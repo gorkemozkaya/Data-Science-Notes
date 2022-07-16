@@ -1,1 +1,1 @@
-https://paperswithcode.com/method/weight-tying
+Weight Tying is a very elegant idea used in deep-learning sequence-to-sequence models. It involves clamping the input embeddings layer to the output softmax layer. For details, see: https://paperswithcode.com/method/weight-tying
