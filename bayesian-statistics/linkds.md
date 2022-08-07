@@ -1,1 +1,0 @@
-* [Expectation Maximization and Variational Inference](https://chrischoy.github.io/research/Expectation-Maximization-and-Variational-Inference/) Connection between the expectation maximizatin algorithm and variational inference. 
