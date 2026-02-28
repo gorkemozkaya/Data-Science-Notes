@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Micro GPT Parameter Visualizer</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background:#0b1020; color:#e8eefc; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 16px; }
+    .controls { display:grid; grid-template-columns: repeat(6, minmax(120px,1fr)); gap:12px; background:#121a33; padding:12px; border-radius:10px; }
+    label { font-size: 12px; color:#9db0e0; display:block; margin-bottom:4px; }
+    input, textarea, button { width:100%; box-sizing:border-box; border-radius:6px; border:1px solid #2a3c70; background:#0f1730; color:#e8eefc; padding:8px; }
+    button { cursor:pointer; background:#1d2c5a; font-weight:600; }
+    button:hover { background:#274081; }
+    .span-2 { grid-column: span 2; }
+    .span-6 { grid-column: span 6; }
+    .metrics { display:flex; gap:20px; margin:12px 0; flex-wrap:wrap; }
+    .metric { background:#121a33; padding:8px 12px; border-radius:8px; }
+    .panel-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:12px; }
+    .param-card { background:#121a33; border-radius:10px; padding:10px; }
+    .param-title { font-size:13px; margin:0 0 8px; color:#c8d5fb; }
+    canvas { width:100%; height:180px; border-radius:6px; background:#0a0f20; }
+    #log { font-family: monospace; font-size:12px; background:#10162c; border-radius:8px; padding:8px; max-height:180px; overflow:auto; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>Micro GPT Training Visualizer</h1>
+  <p>Train a tiny GPT-like model in-browser and inspect every trainable vector/matrix as heatmaps while loss updates.</p>
+
+  <div class="controls">
+    <div><label>Embedding dim</label><input id="nEmbd" type="number" min="4" max="24" value="12" /></div>
+    <div><label>Heads</label><input id="nHead" type="number" min="1" max="4" value="3" /></div>
+    <div><label>Block size</label><input id="blockSize" type="number" min="4" max="20" value="10" /></div>
+    <div><label>Learning rate</label><input id="lr" type="number" step="0.001" value="0.02" /></div>
+    <div><label>Step / second</label><input id="speed" type="number" min="1" max="30" value="5" /></div>
+    <div><label>Total steps</label><input id="totalSteps" type="number" min="1" max="5000" value="400" /></div>
+
+    <div class="span-6">
+      <label>Dataset (one training document per line)</label>
+      <textarea id="dataset" rows="4">hello
+micro
+model
+matrix
+vector
+attention
+visualize
+token
+training
+gradient</textarea>
+    </div>
+
+    <div><button id="initBtn">Initialize</button></div>
+    <div><button id="startBtn">Start</button></div>
+    <div><button id="pauseBtn">Pause</button></div>
+    <div><button id="stepBtn">Single Step</button></div>
+    <div><button id="resetBtn">Reset</button></div>
+  </div>
+
+  <div class="metrics">
+    <div class="metric">Step: <span id="stepOut">0</span></div>
+    <div class="metric">Loss: <span id="lossOut">-</span></div>
+    <div class="metric">Vocab size: <span id="vocabOut">-</span></div>
+  </div>
+
+  <div id="paramPanels" class="panel-grid"></div>
+  <h3>Training log</h3>
+  <div id="log"></div>
+</div>
+
+<script>
+class Value {
+  constructor(data, children = [], localGrads = []) {
+    this.data = data;
+    this.grad = 0;
+    this._children = children;
+    this._localGrads = localGrads;
+  }
+  add(other) {
+    const o = other instanceof Value ? other : new Value(other);
+    return new Value(this.data + o.data, [this, o], [1, 1]);
+  }
+  mul(other) {
+    const o = other instanceof Value ? other : new Value(other);
+    return new Value(this.data * o.data, [this, o], [o.data, this.data]);
+  }
+  pow(p) { return new Value(this.data ** p, [this], [p * (this.data ** (p - 1))]); }
+  exp() { const e = Math.exp(this.data); return new Value(e, [this], [e]); }
+  log() { return new Value(Math.log(this.data + 1e-12), [this], [1 / (this.data + 1e-12)]); }
+  relu() { return new Value(Math.max(0, this.data), [this], [this.data > 0 ? 1 : 0]); }
+  neg() { return this.mul(-1); }
+  sub(other) { return this.add(other instanceof Value ? other.neg() : -other); }
+  div(other) { const o = other instanceof Value ? other : new Value(other); return this.mul(o.pow(-1)); }
+  backward() {
+    const topo = [];
+    const seen = new Set();
+    const build = (v) => {
+      if (!seen.has(v)) {
+        seen.add(v);
+        for (const c of v._children) build(c);
+        topo.push(v);
+      }
+    };
+    build(this);
+    this.grad = 1;
+    for (let i = topo.length - 1; i >= 0; i--) {
+      const v = topo[i];
+      for (let j = 0; j < v._children.length; j++) {
+        v._children[j].grad += v._localGrads[j] * v.grad;
+      }
+    }
+  }
+}
+
+const randn = (std = 0.08) => {
+  const u = 1 - Math.random();
+  const v = Math.random();
+  return std * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+};
+const matrix = (nout, nin, std = 0.08) => Array.from({ length: nout }, () => Array.from({ length: nin }, () => new Value(randn(std))));
+const linear = (x, w) => w.map(row => row.reduce((s, wi, i) => s.add(wi.mul(x[i])), new Value(0)));
+const softmax = (logits) => {
+  const m = Math.max(...logits.map(v => v.data));
+  const ex = logits.map(v => v.sub(m).exp());
+  const total = ex.reduce((s, e) => s.add(e), new Value(0));
+  return ex.map(e => e.div(total));
+};
+const rmsnorm = (x) => {
+  const ms = x.reduce((s, xi) => s.add(xi.mul(xi)), new Value(0)).div(x.length);
+  const scale = ms.add(1e-5).pow(-0.5);
+  return x.map(xi => xi.mul(scale));
+};
+
+let app = null;
+let timer = null;
+
+function buildState(cfg, docs) {
+  const uchars = [...new Set(docs.join(''))].sort();
+  const BOS = uchars.length;
+  const vocabSize = uchars.length + 1;
+  const nEmbd = cfg.nEmbd;
+  const nHead = cfg.nHead;
+  const headDim = Math.floor(nEmbd / nHead);
+
+  const sd = {
+    wte: matrix(vocabSize, nEmbd),
+    wpe: matrix(cfg.blockSize, nEmbd),
+    attn_wq: matrix(nEmbd, nEmbd),
+    attn_wk: matrix(nEmbd, nEmbd),
+    attn_wv: matrix(nEmbd, nEmbd),
+    attn_wo: matrix(nEmbd, nEmbd),
+    mlp_fc1: matrix(2 * nEmbd, nEmbd),
+    mlp_fc2: matrix(nEmbd, 2 * nEmbd),
+    lm_head: matrix(vocabSize, nEmbd),
+  };
+  const params = Object.values(sd).flatMap(mat => mat.flat());
+
+  const gpt = (tokenId, posId, keys, values) => {
+    let x = sd.wte[tokenId].map((t, i) => t.add(sd.wpe[posId][i]));
+    x = rmsnorm(x);
+    const xRes = x;
+    const q = linear(x, sd.attn_wq), k = linear(x, sd.attn_wk), v = linear(x, sd.attn_wv);
+    keys.push(k); values.push(v);
+    const xAttn = [];
+    for (let h = 0; h < nHead; h++) {
+      const hs = h * headDim;
+      const qh = q.slice(hs, hs + headDim);
+      const kh = keys.map(row => row.slice(hs, hs + headDim));
+      const vh = values.map(row => row.slice(hs, hs + headDim));
+      const logits = kh.map(kt => kt.reduce((s, kv, j) => s.add(qh[j].mul(kv)), new Value(0)).div(Math.sqrt(headDim)));
+      const w = softmax(logits);
+      for (let j = 0; j < headDim; j++) {
+        const out = vh.reduce((s, vt, t) => s.add(w[t].mul(vt[j])), new Value(0));
+        xAttn.push(out);
+      }
+    }
+    x = linear(xAttn, sd.attn_wo).map((xi, i) => xi.add(xRes[i]));
+    const xRes2 = x;
+    x = rmsnorm(x);
+    x = linear(x, sd.mlp_fc1).map(vv => vv.relu());
+    x = linear(x, sd.mlp_fc2).map((xi, i) => xi.add(xRes2[i]));
+    return linear(x, sd.lm_head);
+  };
+
+  return { cfg, docs, uchars, BOS, vocabSize, headDim, sd, params, step: 0, gpt };
+}
+
+function tokenize(doc, uchars, BOS) {
+  return [BOS, ...[...doc].map(ch => uchars.indexOf(ch)).filter(i => i >= 0), BOS];
+}
+
+function trainStep() {
+  if (!app || app.step >= app.cfg.totalSteps) return;
+  const doc = app.docs[app.step % app.docs.length];
+  const tokens = tokenize(doc, app.uchars, app.BOS);
+  const n = Math.min(app.cfg.blockSize, tokens.length - 1);
+  const keys = [], values = [];
+  const losses = [];
+
+  for (let pos = 0; pos < n; pos++) {
+    const logits = app.gpt(tokens[pos], pos, keys, values);
+    const probs = softmax(logits);
+    losses.push(probs[tokens[pos + 1]].log().neg());
+  }
+  const loss = losses.reduce((s, l) => s.add(l), new Value(0)).div(n);
+  loss.backward();
+
+  for (const p of app.params) {
+    p.data -= app.cfg.lr * p.grad;
+    p.grad = 0;
+  }
+  app.step += 1;
+  document.getElementById('stepOut').textContent = app.step;
+  document.getElementById('lossOut').textContent = loss.data.toFixed(4);
+  logLine(`step ${app.step} | doc="${doc}" | loss=${loss.data.toFixed(4)}`);
+  drawAll();
+}
+
+function logLine(msg) {
+  const log = document.getElementById('log');
+  log.textContent += msg + "\n";
+  log.scrollTop = log.scrollHeight;
+}
+
+function renderPanels() {
+  const root = document.getElementById('paramPanels');
+  root.innerHTML = '';
+  for (const [name, mat] of Object.entries(app.sd)) {
+    const card = document.createElement('div');
+    card.className = 'param-card';
+    card.innerHTML = `<h4 class="param-title">${name} (${mat.length}x${mat[0].length})</h4><canvas id="cv-${name}"></canvas>`;
+    root.appendChild(card);
+  }
+}
+
+function drawMatrix(canvas, mat) {
+  const ctx = canvas.getContext('2d');
+  const rows = mat.length, cols = mat[0].length;
+  const vals = mat.flat().map(v => v.data);
+  const maxAbs = Math.max(1e-6, ...vals.map(v => Math.abs(v)));
+  const W = canvas.width = cols * 8;
+  const H = canvas.height = rows * 8;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const v = mat[r][c].data / maxAbs;
+      const red = v > 0 ? Math.floor(255 * v) : 0;
+      const blue = v < 0 ? Math.floor(-255 * v) : 0;
+      ctx.fillStyle = `rgb(${red},20,${blue})`;
+      ctx.fillRect(c * 8, r * 8, 8, 8);
+    }
+  }
+  ctx.strokeStyle = '#2a3c70';
+  ctx.strokeRect(0, 0, W, H);
+}
+
+function drawAll() {
+  if (!app) return;
+  for (const [name, mat] of Object.entries(app.sd)) {
+    const c = document.getElementById(`cv-${name}`);
+    if (c) drawMatrix(c, mat);
+  }
+}
+
+function init() {
+  const nEmbd = Number(document.getElementById('nEmbd').value);
+  const nHead = Number(document.getElementById('nHead').value);
+  if (nEmbd % nHead !== 0) {
+    alert('Embedding dim must be divisible by number of heads.');
+    return;
+  }
+  const docs = document.getElementById('dataset').value.split('\n').map(x => x.trim()).filter(Boolean);
+  if (!docs.length) return;
+  app = buildState({
+    nEmbd,
+    nHead,
+    blockSize: Number(document.getElementById('blockSize').value),
+    lr: Number(document.getElementById('lr').value),
+    speed: Number(document.getElementById('speed').value),
+    totalSteps: Number(document.getElementById('totalSteps').value),
+  }, docs);
+  document.getElementById('vocabOut').textContent = app.vocabSize;
+  document.getElementById('stepOut').textContent = '0';
+  document.getElementById('lossOut').textContent = '-';
+  document.getElementById('log').textContent = '';
+  renderPanels();
+  drawAll();
+  logLine(`Initialized with ${docs.length} docs and ${app.params.length} parameters.`);
+}
+
+document.getElementById('initBtn').onclick = init;
+document.getElementById('startBtn').onclick = () => {
+  if (!app) init();
+  clearInterval(timer);
+  timer = setInterval(() => {
+    trainStep();
+    if (app.step >= app.cfg.totalSteps) clearInterval(timer);
+  }, 1000 / app.cfg.speed);
+};
+document.getElementById('pauseBtn').onclick = () => clearInterval(timer);
+document.getElementById('stepBtn').onclick = () => { if (!app) init(); trainStep(); };
+document.getElementById('resetBtn').onclick = () => { clearInterval(timer); init(); };
+init();
+</script>
+</body>
+</html>
