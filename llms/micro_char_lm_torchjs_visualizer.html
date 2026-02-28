@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>JS PyTorch-Style Micro Char LM (2D Embeddings)</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b1020;
+      --card: #141b2e;
+      --muted: #92a2c3;
+      --accent: #6ee7f9;
+      --accent2: #a78bfa;
+      --good: #34d399;
+      --warn: #fbbf24;
+      --text: #e6eefb;
+      --grid: #26314f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      background: radial-gradient(1200px 500px at 20% -10%, #1b2440, #0b1020);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .wrap { max-width: 1200px; margin: 0 auto; }
+    h1 { margin: 0 0 8px; font-size: 1.65rem; }
+    p { margin: 4px 0; color: var(--muted); }
+    .grid {
+      margin-top: 16px;
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 14px;
+    }
+    .card {
+      background: linear-gradient(180deg, #151d33, #121a2e);
+      border: 1px solid #273456;
+      border-radius: 14px;
+      padding: 14px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+    }
+    .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; align-items: center; }
+    button, select, input {
+      background: #0d1530;
+      color: var(--text);
+      border: 1px solid #32426f;
+      border-radius: 10px;
+      padding: 8px 12px;
+      font: inherit;
+    }
+    button { cursor: pointer; }
+    button:hover { border-color: #4f66a3; }
+    .stat {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--good);
+      margin-left: auto;
+    }
+    canvas {
+      width: 100%;
+      height: 280px;
+      border: 1px solid #25345d;
+      border-radius: 12px;
+      background: #0a1124;
+    }
+    #probCanvas { height: 340px; }
+    .sample {
+      margin-top: 10px;
+      background: #0a1124;
+      border: 1px solid #25345d;
+      border-radius: 12px;
+      padding: 10px;
+      min-height: 92px;
+      white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      line-height: 1.25;
+    }
+    .mini-note { color: var(--warn); font-size: 0.9rem; }
+    @media (max-width: 980px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>JS PyTorch-Style Character LM</h1>
+    <p>Very small next-character model with <strong>2D learned embeddings</strong> over lowercase ASCII letters + digits + space.</p>
+    <p class="mini-note" id="dataStatus">Loading natural English corpus from a public GitHub repo...</p>
+
+    <div class="grid">
+      <section class="card">
+        <div class="controls">
+          <button id="startBtn">Start / Resume</button>
+          <button id="pauseBtn">Pause</button>
+          <button id="resetBtn">Reset</button>
+          <label>Steps/tick <input id="stepsInput" type="number" value="40" min="1" max="500" style="width:82px"></label>
+          <label>Learn rate <input id="lrInput" type="number" value="0.2" step="0.01" min="0.001" max="2" style="width:90px"></label>
+          <span class="stat" id="stats">step=0 loss=0.000</span>
+        </div>
+        <p>Embedding space (2 dimensions). Each point is one character token.</p>
+        <canvas id="embedCanvas" width="720" height="300"></canvas>
+        <p style="margin-top:10px">Training loss over time.</p>
+        <canvas id="lossCanvas" width="720" height="220"></canvas>
+      </section>
+
+      <section class="card">
+        <div class="controls">
+          <label>Inspect char
+            <select id="inspectSelect"></select>
+          </label>
+          <button id="sampleBtn">Sample text</button>
+        </div>
+        <p>Predicted next-char probabilities for selected input.</p>
+        <canvas id="probCanvas" width="540" height="360"></canvas>
+        <p style="margin-top:10px">Representative sampled text:</p>
+        <div class="sample" id="sampleText"></div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    "use strict";
+
+    // -----------------------------
+    // Data: lowercase + numerics + space only
+    // Natural text is downloaded from a GitHub repo.
+    // -----------------------------
+    const VOCAB = " abcdefghijklmnopqrstuvwxyz0123456789";
+    const V = VOCAB.length;
+    const CORPUS_URL = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt";
+
+    const xData = [];
+    const yData = [];
+    let corpusReady = false;
+
+    function normalizeCorpus(text) {
+      return text
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    async function loadCorpusFromRepo() {
+      const statusEl = document.getElementById("dataStatus");
+      try {
+        const resp = await fetch(CORPUS_URL, { cache: "no-store" });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const rawText = await resp.text();
+        const corpus = normalizeCorpus(rawText);
+        if (corpus.length < 2000) throw new Error("Corpus too small after normalization");
+
+        xData.length = 0;
+        yData.length = 0;
+        for (let i = 0; i < corpus.length - 1; i++) {
+          const a = VOCAB.indexOf(corpus[i]);
+          const b = VOCAB.indexOf(corpus[i + 1]);
+          if (a >= 0 && b >= 0) {
+            xData.push(a);
+            yData.push(b);
+          }
+        }
+
+        corpusReady = xData.length > 10;
+        statusEl.textContent = `Loaded natural English text from GitHub (${corpus.length.toLocaleString()} chars normalized). Vocabulary constrained to [a-z0-9 ].`;
+      } catch (err) {
+        corpusReady = false;
+        statusEl.textContent = `Failed to load corpus from GitHub repo: ${err.message}. Please allow network and press Reset.`;
+      }
+    }
+
+    // -----------------------------
+    // Tiny model (PyTorch-style math in JS)
+    // Emb: [V,2], W: [2,V], b: [V]
+    // logits = Emb[x] @ W + b
+    // -----------------------------
+    const model = {
+      emb: [],
+      W: [],
+      b: [],
+      step: 0,
+      lossHistory: []
+    };
+
+    function randn(scale = 0.2) {
+      let u = 0, v = 0;
+      while (u === 0) u = Math.random();
+      while (v === 0) v = Math.random();
+      return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v) * scale;
+    }
+
+    function initModel() {
+      model.emb = Array.from({ length: V }, () => [randn(0.5), randn(0.5)]);
+      model.W = Array.from({ length: 2 }, () => Array.from({ length: V }, () => randn(0.3)));
+      model.b = Array.from({ length: V }, () => 0);
+      model.step = 0;
+      model.lossHistory = [];
+    }
+
+    function softmax(logits) {
+      let m = -Infinity;
+      for (const z of logits) if (z > m) m = z;
+      const exps = logits.map(z => Math.exp(z - m));
+      const sum = exps.reduce((a, b) => a + b, 0);
+      return exps.map(e => e / sum);
+    }
+
+    function trainStep(lr = 0.2) {
+      if (!corpusReady || xData.length < 2) return 0;
+      const idx = Math.floor(Math.random() * xData.length);
+      const x = xData[idx];
+      const y = yData[idx];
+
+      const ex = model.emb[x];
+      const logits = Array.from({ length: V }, (_, j) => ex[0] * model.W[0][j] + ex[1] * model.W[1][j] + model.b[j]);
+      const probs = softmax(logits);
+      const loss = -Math.log(Math.max(probs[y], 1e-9));
+
+      const dlogits = probs.slice();
+      dlogits[y] -= 1;
+
+      const dW0 = Array.from({ length: V }, (_, j) => ex[0] * dlogits[j]);
+      const dW1 = Array.from({ length: V }, (_, j) => ex[1] * dlogits[j]);
+      const db = dlogits;
+
+      let de0 = 0;
+      let de1 = 0;
+      for (let j = 0; j < V; j++) {
+        de0 += dlogits[j] * model.W[0][j];
+        de1 += dlogits[j] * model.W[1][j];
+      }
+
+      for (let j = 0; j < V; j++) {
+        model.W[0][j] -= lr * dW0[j];
+        model.W[1][j] -= lr * dW1[j];
+        model.b[j] -= lr * db[j];
+      }
+      model.emb[x][0] -= lr * de0;
+      model.emb[x][1] -= lr * de1;
+
+      model.step += 1;
+      model.lossHistory.push(loss);
+      if (model.lossHistory.length > 700) model.lossHistory.shift();
+      return loss;
+    }
+
+    function probsForChar(charIndex) {
+      const e = model.emb[charIndex];
+      const logits = Array.from({ length: V }, (_, j) => e[0] * model.W[0][j] + e[1] * model.W[1][j] + model.b[j]);
+      return softmax(logits);
+    }
+
+    function sampleText(startChar = "d", length = 140, temperature = 0.9) {
+      let idx = Math.max(0, VOCAB.indexOf(startChar));
+      let out = VOCAB[idx];
+      for (let i = 0; i < length; i++) {
+        const p = probsForChar(idx).map(v => Math.pow(v, 1 / Math.max(temperature, 1e-3)));
+        const s = p.reduce((a, b) => a + b, 0);
+        let r = Math.random() * s;
+        let next = 0;
+        for (let j = 0; j < V; j++) {
+          r -= p[j];
+          if (r <= 0) { next = j; break; }
+        }
+        out += VOCAB[next];
+        idx = next;
+      }
+      return out;
+    }
+
+    // -----------------------------
+    // Drawing helpers
+    // -----------------------------
+    const embedCanvas = document.getElementById("embedCanvas");
+    const lossCanvas = document.getElementById("lossCanvas");
+    const probCanvas = document.getElementById("probCanvas");
+    const statsEl = document.getElementById("stats");
+    const sampleEl = document.getElementById("sampleText");
+    const inspectSelect = document.getElementById("inspectSelect");
+
+    for (const c of VOCAB) {
+      const opt = document.createElement("option");
+      opt.value = c;
+      opt.textContent = c === " " ? "[space]" : c;
+      inspectSelect.appendChild(opt);
+    }
+    inspectSelect.value = "d";
+
+    function clearCanvas(ctx, w, h) {
+      ctx.fillStyle = "#0a1124";
+      ctx.fillRect(0, 0, w, h);
+    }
+
+    function drawEmbeddings() {
+      const ctx = embedCanvas.getContext("2d");
+      const w = embedCanvas.width;
+      const h = embedCanvas.height;
+      clearCanvas(ctx, w, h);
+
+      const xs = model.emb.map(p => p[0]);
+      const ys = model.emb.map(p => p[1]);
+      const minX = Math.min(...xs) - 0.2;
+      const maxX = Math.max(...xs) + 0.2;
+      const minY = Math.min(...ys) - 0.2;
+      const maxY = Math.max(...ys) + 0.2;
+
+      const sx = x => 30 + ((x - minX) / Math.max(1e-6, maxX - minX)) * (w - 60);
+      const sy = y => h - 30 - ((y - minY) / Math.max(1e-6, maxY - minY)) * (h - 60);
+
+      ctx.strokeStyle = "#243258";
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 6; i++) {
+        const gx = 30 + i * (w - 60) / 5;
+        const gy = 30 + i * (h - 60) / 5;
+        ctx.beginPath(); ctx.moveTo(gx, 30); ctx.lineTo(gx, h - 30); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(30, gy); ctx.lineTo(w - 30, gy); ctx.stroke();
+      }
+
+      ctx.font = "12px ui-monospace, monospace";
+      for (let i = 0; i < V; i++) {
+        const x = sx(model.emb[i][0]);
+        const y = sy(model.emb[i][1]);
+        ctx.fillStyle = i === VOCAB.indexOf(inspectSelect.value) ? "#fbbf24" : "#6ee7f9";
+        ctx.beginPath();
+        ctx.arc(x, y, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#dbeafe";
+        ctx.fillText(VOCAB[i] === " " ? "_" : VOCAB[i], x + 6, y - 6);
+      }
+
+      ctx.fillStyle = "#93a5cc";
+      ctx.fillText("Embedding dim 1", 10, h - 8);
+      ctx.save();
+      ctx.translate(10, 20);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillText("Embedding dim 2", 0, 0);
+      ctx.restore();
+    }
+
+    function drawLoss() {
+      const ctx = lossCanvas.getContext("2d");
+      const w = lossCanvas.width;
+      const h = lossCanvas.height;
+      clearCanvas(ctx, w, h);
+
+      const arr = model.lossHistory;
+      if (!arr.length) return;
+
+      const maxL = Math.max(...arr, 0.5);
+      const minL = Math.min(...arr, 0);
+
+      ctx.strokeStyle = "#27385f";
+      for (let i = 0; i < 5; i++) {
+        const y = 20 + i * (h - 40) / 4;
+        ctx.beginPath(); ctx.moveTo(35, y); ctx.lineTo(w - 10, y); ctx.stroke();
+      }
+
+      ctx.strokeStyle = "#34d399";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      arr.forEach((v, i) => {
+        const x = 35 + (i / Math.max(1, arr.length - 1)) * (w - 50);
+        const y = h - 20 - ((v - minL) / Math.max(1e-6, maxL - minL)) * (h - 40);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+
+      ctx.fillStyle = "#9ab0da";
+      ctx.font = "12px ui-monospace, monospace";
+      ctx.fillText(`min=${minL.toFixed(3)} max=${maxL.toFixed(3)}`, 36, 16);
+    }
+
+    function drawProbs() {
+      const ctx = probCanvas.getContext("2d");
+      const w = probCanvas.width;
+      const h = probCanvas.height;
+      clearCanvas(ctx, w, h);
+
+      const ch = inspectSelect.value;
+      const idx = VOCAB.indexOf(ch);
+      const probs = probsForChar(idx);
+
+      const entries = probs.map((p, i) => ({ c: VOCAB[i], p }))
+                           .sort((a, b) => b.p - a.p)
+                           .slice(0, 14);
+
+      const barH = 20;
+      const gap = 4;
+      const x0 = 90;
+      const maxW = w - x0 - 20;
+      entries.forEach((e, i) => {
+        const y = 20 + i * (barH + gap);
+        const bw = maxW * e.p;
+        ctx.fillStyle = i < 3 ? "#a78bfa" : "#6ee7f9";
+        ctx.fillRect(x0, y, bw, barH);
+        ctx.fillStyle = "#dbeafe";
+        ctx.font = "13px ui-monospace, monospace";
+        ctx.fillText((e.c === " " ? "[sp]" : e.c), 24, y + 14);
+        ctx.fillText(e.p.toFixed(3), x0 + bw + 8, y + 14);
+      });
+
+      ctx.fillStyle = "#9ab0da";
+      ctx.fillText(`input char: ${ch === " " ? "[space]" : ch}`, 20, h - 16);
+    }
+
+    function redraw() {
+      drawEmbeddings();
+      drawLoss();
+      drawProbs();
+    }
+
+    // -----------------------------
+    // Training loop
+    // -----------------------------
+    let running = false;
+    function tick() {
+      if (!running) return;
+      const steps = Math.max(1, Number(document.getElementById("stepsInput").value) || 20);
+      const lr = Math.max(0.0001, Number(document.getElementById("lrInput").value) || 0.2);
+      let loss = 0;
+      for (let i = 0; i < steps; i++) loss = trainStep(lr);
+      statsEl.textContent = `step=${model.step} loss=${loss.toFixed(4)}`;
+      if (model.step % 200 === 0) {
+        sampleEl.textContent = sampleText(inspectSelect.value, 160, 0.8);
+      }
+      redraw();
+      requestAnimationFrame(tick);
+    }
+
+    document.getElementById("startBtn").onclick = () => {
+      if (!corpusReady) return;
+      if (!running) {
+        running = true;
+        requestAnimationFrame(tick);
+      }
+    };
+    document.getElementById("pauseBtn").onclick = () => { running = false; };
+    document.getElementById("resetBtn").onclick = () => {
+      running = false;
+      initModel();
+      statsEl.textContent = "step=0 loss=0.000";
+      sampleEl.textContent = corpusReady ? sampleText("d", 140, 1.0) : "waiting for corpus download...";
+      redraw();
+      loadCorpusFromRepo();
+    };
+    document.getElementById("sampleBtn").onclick = () => {
+      if (!corpusReady) return;
+      sampleEl.textContent = sampleText(inspectSelect.value, 180, 0.75);
+      drawProbs();
+    };
+    inspectSelect.onchange = () => {
+      drawEmbeddings();
+      drawProbs();
+      sampleEl.textContent = sampleText(inspectSelect.value, 140, 0.8);
+    };
+
+    initModel();
+    sampleEl.textContent = "waiting for corpus download...";
+    redraw();
+    loadCorpusFromRepo();
+  </script>
+</body>
+</html>
