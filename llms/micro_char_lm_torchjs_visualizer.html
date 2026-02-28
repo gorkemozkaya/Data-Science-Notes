@@ -87,7 +87,7 @@
   <div class="wrap">
     <h1>JS PyTorch-Style Character LM</h1>
     <p>Very small next-character model with <strong>2D learned embeddings</strong> over lowercase ASCII letters + digits + space.</p>
-    <p class="mini-note">Training corpus is synthetic and constrained to <code>[a-z0-9 ]</code>.</p>
+    <p class="mini-note" id="dataStatus">Loading natural English corpus from a public GitHub repo...</p>
 
     <div class="grid">
       <section class="card">
@@ -125,28 +125,77 @@
 
     // -----------------------------
     // Data: lowercase + numerics + space only
+    // Natural text is downloaded from a GitHub repo.
     // -----------------------------
     const VOCAB = " abcdefghijklmnopqrstuvwxyz0123456789";
     const V = VOCAB.length;
-
-    const corpus = (
-      "data science is fun and useful " +
-      "models learn patterns from data " +
-      "small char model predicts next token " +
-      "we train with gradient descent and softmax " +
-      "embeddings in 2d show structure and meaning " +
-      "numbers like 2024 and 123 appear in text " +
-      "simple systems can teach deep ideas "
-    ).replace(/[^a-z0-9 ]/g, "");
+    const CORPUS_URLS = [
+      "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt",
+      "https://cdn.jsdelivr.net/gh/karpathy/char-rnn@master/data/tinyshakespeare/input.txt"
+    ];
 
     const xData = [];
     const yData = [];
-    for (let i = 0; i < corpus.length - 1; i++) {
-      const a = VOCAB.indexOf(corpus[i]);
-      const b = VOCAB.indexOf(corpus[i + 1]);
-      if (a >= 0 && b >= 0) {
-        xData.push(a);
-        yData.push(b);
+    let corpusReady = false;
+
+    function setCorpusReadyUI(ready) {
+      document.getElementById("startBtn").disabled = !ready;
+      document.getElementById("sampleBtn").disabled = !ready;
+    }
+
+    function normalizeCorpus(text) {
+      return text
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    async function loadCorpusFromRepo() {
+      const statusEl = document.getElementById("dataStatus");
+      statusEl.textContent = "Loading natural English corpus from GitHub...";
+      setCorpusReadyUI(false);
+
+      try {
+        let rawText = "";
+        let sourceUrl = "";
+        let lastErr = null;
+
+        for (const url of CORPUS_URLS) {
+          try {
+            const resp = await fetch(url, { cache: "no-store" });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            rawText = await resp.text();
+            sourceUrl = url;
+            break;
+          } catch (err) {
+            lastErr = err;
+          }
+        }
+
+        if (!rawText) throw lastErr || new Error("No corpus URL succeeded");
+
+        const corpus = normalizeCorpus(rawText);
+        if (corpus.length < 2000) throw new Error("Corpus too small after normalization");
+
+        xData.length = 0;
+        yData.length = 0;
+        for (let i = 0; i < corpus.length - 1; i++) {
+          const a = VOCAB.indexOf(corpus[i]);
+          const b = VOCAB.indexOf(corpus[i + 1]);
+          if (a >= 0 && b >= 0) {
+            xData.push(a);
+            yData.push(b);
+          }
+        }
+
+        corpusReady = xData.length > 10;
+        setCorpusReadyUI(corpusReady);
+        statusEl.textContent = `Loaded natural English text from repo (${corpus.length.toLocaleString()} chars normalized). Source: ${sourceUrl}. Vocabulary constrained to [a-z0-9 ].`;
+      } catch (err) {
+        corpusReady = false;
+        setCorpusReadyUI(false);
+        statusEl.textContent = `Failed to load corpus from public repo: ${err.message}. Please allow network and press Reset.`;
       }
     }
 
@@ -187,6 +236,7 @@
     }
 
     function trainStep(lr = 0.2) {
+      if (!corpusReady || xData.length < 2) return 0;
       const idx = Math.floor(Math.random() * xData.length);
       const x = xData[idx];
       const y = yData[idx];
@@ -408,6 +458,7 @@
     }
 
     document.getElementById("startBtn").onclick = () => {
+      if (!corpusReady) return;
       if (!running) {
         running = true;
         requestAnimationFrame(tick);
@@ -418,10 +469,12 @@
       running = false;
       initModel();
       statsEl.textContent = "step=0 loss=0.000";
-      sampleEl.textContent = sampleText("d", 140, 1.0);
+      sampleEl.textContent = corpusReady ? sampleText("d", 140, 1.0) : "waiting for corpus download...";
       redraw();
+      loadCorpusFromRepo();
     };
     document.getElementById("sampleBtn").onclick = () => {
+      if (!corpusReady) return;
       sampleEl.textContent = sampleText(inspectSelect.value, 180, 0.75);
       drawProbs();
     };
@@ -432,8 +485,10 @@
     };
 
     initModel();
-    sampleEl.textContent = sampleText("d", 160, 1.0);
+    setCorpusReadyUI(false);
+    sampleEl.textContent = "waiting for corpus download...";
     redraw();
+    loadCorpusFromRepo();
   </script>
 </body>
 </html>

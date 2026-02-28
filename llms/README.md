@@ -25,7 +25,7 @@ Features:
 Open `micro_char_lm_torchjs_visualizer.html` for a very small, educational next-character language model implemented in plain JavaScript with PyTorch-style tensor math.
 
 Features:
-- Uses a constrained vocabulary: lowercase ASCII letters, digits, and space.
+- Downloads natural English text from a public repo (GitHub Tiny Shakespeare, with CDN fallback) and normalizes it to the constrained vocabulary.
 - Learns **2D character embeddings** and displays them live during training.
 - Predicts next-character probabilities for a selected input character.
 - Shows training loss and sampled representative text as the model improves.
