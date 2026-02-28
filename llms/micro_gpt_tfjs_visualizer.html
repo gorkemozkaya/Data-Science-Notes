@@ -43,6 +43,22 @@
   <p class="small">Downloads Karpathy's names dataset, trains a tiny GPT-like model in-browser, and visualizes parameter matrices with hover metadata.</p>
 
   <div class="controls">
+    <div><label>Embedding dim</label><input id="nEmbd" type="number" min="8" max="96" value="32"></div>
+    <div><label>Heads</label><input id="nHead" type="number" min="1" max="8" value="4"></div>
+    <div><label>Block size</label><input id="blockSize" type="number" min="4" max="24" value="10"></div>
+    <div><label>Batch size</label><input id="batchSize" type="number" min="8" max="256" value="32"></div>
+    <div><label>Learning rate</label><input id="lr" type="number" step="0.0001" value="0.004"></div>
+    <div><label>Total steps</label><input id="totalSteps" type="number" min="10" max="20000" value="1200"></div>
+
+    <div><label>UI updates / sec</label><input id="fps" type="number" min="1" max="30" value="8"></div>
+    <div><label>Evaluate every N steps</label><input id="evalEvery" type="number" min="10" max="2000" value="50"></div>
+    <div><label>Samples per eval</label><input id="sampleCount" type="number" min="1" max="8" value="3"></div>
+    <div><label>Sampling temperature</label><input id="temperature" type="number" min="0.2" max="2" step="0.1" value="0.8"></div>
+    <div><label>Train split (0-1)</label><input id="trainFrac" type="number" min="0.5" max="0.99" step="0.01" value="0.9"></div>
+    <div><label>Visualize matrix</label><input id="matrixFilter" value="wte,wq,wk,wv,wo,ff1,ff2,lmHead"></div>
+
+    <div class="span-3"><button id="presetFastBtn">Fast preset</button></div>
+    <div class="span-3"><button id="loadBtn">1) Download Dataset</button></div>
     <div><label>Embedding dim</label><input id="nEmbd" type="number" min="8" max="96" value="48"></div>
     <div><label>Heads</label><input id="nHead" type="number" min="1" max="8" value="4"></div>
     <div><label>Block size</label><input id="blockSize" type="number" min="4" max="24" value="12"></div>
@@ -70,6 +86,7 @@
     <div class="metric">Dataset size: <span id="dataOut">0</span></div>
     <div class="metric">Vocab size: <span id="vocabOut">0</span></div>
     <div class="metric">Params: <span id="paramsOut">0</span></div>
+    <div class="metric">Speed: <span id="speedOut">-</span></div>
   </div>
 
   <div class="row">
@@ -80,6 +97,8 @@
     <div class="samples">
       <h3>Name predictions</h3>
       <pre id="samplesOut">(run training)</pre>
+      <h3>Next-char predictions (top-5)</h3>
+      <pre id="nextCharOut">(run training)</pre>
       <h3>Log</h3>
       <pre id="log"></pre>
     </div>
@@ -98,6 +117,8 @@ const state = {
   step: 0, running: false, uiTimer: null,
   lastTrainLoss: null, lastValLoss: null,
   lastSamples: [],
+  lastStepTime: performance.now(),
+  emaSps: 0,
   canvasMeta: new Map(),
 };
 
@@ -153,6 +174,7 @@ function randomBatch(splitNames, blockSize, batchSize) {
     const name = splitNames[(Math.random() * splitNames.length) | 0];
     const seq = `${BOS}${name}${EOS}`;
     const ids = [...seq].map(ch => state.stoi.get(ch));
+    const start = 0;
     const maxStart = Math.max(1, ids.length - 1);
     const start = (Math.random() * maxStart) | 0;
     const ctx = Array(blockSize).fill(state.stoi.get(BOS));
@@ -320,6 +342,36 @@ async function sampleNames() {
   byId('samplesOut').textContent = arr.map((s, i) => `${i + 1}. ${s}`).join('\n');
 }
 
+async function nextCharPredictions() {
+  const prompts = ['a', 'ma', 'jo', 'el'];
+  const cfg = state.model.cfg;
+  const outLines = [];
+  for (const prompt of prompts) {
+    const ids = [...(`${BOS}${prompt}`)].map(ch => state.stoi.get(ch) ?? state.stoi.get(BOS));
+    const ctx = Array(cfg.blockSize).fill(state.stoi.get(BOS));
+    for (let i = 0; i < Math.min(cfg.blockSize, ids.length); i++) {
+      ctx[cfg.blockSize - Math.min(cfg.blockSize, ids.length) + i] = ids[i];
+    }
+    const x = tf.tensor2d(ctx, [1, cfg.blockSize], 'int32');
+    const probs = tf.tidy(() => {
+      const logits = state.model.forward(x).slice([0, cfg.blockSize - 1, 0], [1, 1, state.chars.length]).reshape([state.chars.length]);
+      return tf.softmax(logits);
+    });
+    const data = await probs.data();
+    x.dispose(); probs.dispose();
+
+    const top = [...data]
+      .map((p, i) => ({ ch: state.itos.get(i), p }))
+      .filter(x => x.ch !== BOS)
+      .sort((a, b) => b.p - a.p)
+      .slice(0, 5)
+      .map(x => `${x.ch}:${(x.p * 100).toFixed(1)}%`)
+      .join('  ');
+    outLines.push(`${prompt} -> ${top}`);
+  }
+  byId('nextCharOut').textContent = outLines.join('\n');
+}
+
 async function trainLoop() {
   const cfg = state.model.cfg;
   const evalEvery = Number(byId('evalEvery').value);
@@ -336,10 +388,19 @@ async function trainLoop() {
     state.lastTrainLoss = loss;
     state.step += 1;
 
+    const t = performance.now();
+    const dt = Math.max(1e-3, (t - state.lastStepTime) / 1000);
+    const sps = 1 / dt;
+    state.emaSps = state.emaSps ? (0.9 * state.emaSps + 0.1 * sps) : sps;
+    state.lastStepTime = t;
+
     const now = performance.now();
     if (now - lastUi > uiEveryMs) {
       byId('stepOut').textContent = state.step;
       byId('trainLossOut').textContent = state.lastTrainLoss.toFixed(4);
+      byId('speedOut').textContent = `${state.emaSps.toFixed(1)} steps/s`;
+      lastUi = now;
+      await tf.nextFrame();
       lastUi = now;
     }
 
@@ -347,6 +408,7 @@ async function trainLoop() {
       state.lastValLoss = await evaluateLoss('val');
       byId('valLossOut').textContent = state.lastValLoss.toFixed(4);
       await sampleNames();
+      await nextCharPredictions();
       await updateVisuals();
       log(`step=${state.step} train=${state.lastTrainLoss.toFixed(4)} val=${state.lastValLoss.toFixed(4)}`);
       await tf.nextFrame();
@@ -414,12 +476,30 @@ async function initModel() {
   byId('trainLossOut').textContent = '-';
   byId('valLossOut').textContent = '-';
   byId('samplesOut').textContent = '(run training)';
+  byId('nextCharOut').textContent = '(run training)';
+  byId('paramsOut').textContent = countParams(state.model).toLocaleString();
+  state.lastStepTime = performance.now();
+  state.emaSps = 0;
   byId('paramsOut').textContent = countParams(state.model).toLocaleString();
   renderPanels();
   await updateVisuals();
   log('Model initialized.');
 }
 
+function setFastPreset() {
+  byId('nEmbd').value = 32;
+  byId('nHead').value = 4;
+  byId('blockSize').value = 10;
+  byId('batchSize').value = 32;
+  byId('lr').value = 0.004;
+  byId('totalSteps').value = 1200;
+  byId('evalEvery').value = 50;
+  byId('sampleCount').value = 3;
+  byId('temperature').value = 0.8;
+  log('Applied fast preset.');
+}
+
+byId('presetFastBtn').onclick = setFastPreset;
 byId('loadBtn').onclick = loadDataset;
 byId('initBtn').onclick = initModel;
 byId('startBtn').onclick = async () => {
