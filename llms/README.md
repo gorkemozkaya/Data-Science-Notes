@@ -4,7 +4,7 @@ Large Language Models
 
 ### 1) Vanilla JS autograd demo
 
-Open `micro_gpt_visualizer.html` in a browser (or serve this folder with `python -m http.server`) to run an interactive, in-browser Micro GPT-style training demo.
+Open `visualizations/micro_gpt_visualizer.html` in a browser (or serve this folder with `python -m http.server`) to run an interactive, in-browser Micro GPT-style training demo.
 
 Features:
 - Configure embedding size, attention heads, block size, learning rate, and total steps.
@@ -13,7 +13,7 @@ Features:
 
 ### 2) TensorFlow.js names demo
 
-Open `micro_gpt_tfjs_visualizer.html` to run a more efficient Micro GPT-style visualization powered by TensorFlow.js.
+Open `visualizations/micro_gpt_tfjs_visualizer.html` to run a more efficient Micro GPT-style visualization powered by TensorFlow.js.
 
 Features:
 - Downloads Karpathy's `names.txt` dataset and trains a tiny character-level GPT-like model in the browser.
@@ -22,7 +22,7 @@ Features:
 
 ### 3) JS PyTorch-style micro char LM (2D embeddings)
 
-Open `micro_char_lm_torchjs_visualizer.html` for a very small, educational next-character language model implemented in plain JavaScript with PyTorch-style tensor math.
+Open `visualizations/micro_char_lm_torchjs_visualizer.html` for a very small, educational next-character language model implemented in plain JavaScript with PyTorch-style tensor math.
 
 Features:
 - Downloads natural English text from a public repo (GitHub Tiny Shakespeare, with CDN fallback) and normalizes it to the constrained vocabulary.
