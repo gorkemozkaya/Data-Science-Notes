@@ -59,6 +59,21 @@
 
     <div class="span-3"><button id="presetFastBtn">Fast preset</button></div>
     <div class="span-3"><button id="loadBtn">1) Download Dataset</button></div>
+    <div><label>Embedding dim</label><input id="nEmbd" type="number" min="8" max="96" value="48"></div>
+    <div><label>Heads</label><input id="nHead" type="number" min="1" max="8" value="4"></div>
+    <div><label>Block size</label><input id="blockSize" type="number" min="4" max="24" value="12"></div>
+    <div><label>Batch size</label><input id="batchSize" type="number" min="8" max="256" value="64"></div>
+    <div><label>Learning rate</label><input id="lr" type="number" step="0.0001" value="0.003"></div>
+    <div><label>Total steps</label><input id="totalSteps" type="number" min="10" max="20000" value="3000"></div>
+
+    <div><label>UI updates / sec</label><input id="fps" type="number" min="1" max="30" value="8"></div>
+    <div><label>Evaluate every N steps</label><input id="evalEvery" type="number" min="10" max="2000" value="200"></div>
+    <div><label>Samples per eval</label><input id="sampleCount" type="number" min="1" max="8" value="4"></div>
+    <div><label>Sampling temperature</label><input id="temperature" type="number" min="0.2" max="2" step="0.1" value="0.9"></div>
+    <div><label>Train split (0-1)</label><input id="trainFrac" type="number" min="0.5" max="0.99" step="0.01" value="0.9"></div>
+    <div><label>Visualize matrix</label><input id="matrixFilter" value="wte,wq,wk,wv,wo,ff1,ff2,lmHead"></div>
+
+    <div class="span-6"><button id="loadBtn">1) Download Dataset</button></div>
     <div class="span-2"><button id="initBtn">2) Initialize Model</button></div>
     <div class="span-2"><button id="startBtn">3) Start Training</button></div>
     <div class="span-2"><button id="pauseBtn">Pause</button></div>
@@ -160,6 +175,8 @@ function randomBatch(splitNames, blockSize, batchSize) {
     const seq = `${BOS}${name}${EOS}`;
     const ids = [...seq].map(ch => state.stoi.get(ch));
     const start = 0;
+    const maxStart = Math.max(1, ids.length - 1);
+    const start = (Math.random() * maxStart) | 0;
     const ctx = Array(blockSize).fill(state.stoi.get(BOS));
     for (let t = 0; t < blockSize; t++) {
       const srcIdx = start + t;
@@ -384,6 +401,7 @@ async function trainLoop() {
       byId('speedOut').textContent = `${state.emaSps.toFixed(1)} steps/s`;
       lastUi = now;
       await tf.nextFrame();
+      lastUi = now;
     }
 
     if (state.step % evalEvery === 0 || state.step === 1) {
@@ -462,6 +480,7 @@ async function initModel() {
   byId('paramsOut').textContent = countParams(state.model).toLocaleString();
   state.lastStepTime = performance.now();
   state.emaSps = 0;
+  byId('paramsOut').textContent = countParams(state.model).toLocaleString();
   renderPanels();
   await updateVisuals();
   log('Model initialized.');

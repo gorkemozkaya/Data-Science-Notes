@@ -17,5 +17,5 @@ Open `micro_gpt_tfjs_visualizer.html` to run a more efficient Micro GPT-style vi
 
 Features:
 - Downloads Karpathy's `names.txt` dataset and trains a tiny character-level GPT-like model in the browser.
-- Displays train/validation loss, real-time training speed, and generated name predictions every configurable number of steps.
-- Visualizes parameter matrices as heatmaps with mouseover tooltips (row/column/value plus matrix statistics), and includes top-5 next-character predictions for fixed prompts.
+- Displays train/validation loss and generated name predictions every configurable number of steps.
+- Visualizes parameter matrices as heatmaps with mouseover tooltips (row/column/value plus matrix statistics).
