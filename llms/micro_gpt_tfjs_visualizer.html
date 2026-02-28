@@ -3,108 +3,119 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Micro GPT (TensorFlow.js) Visualizer</title>
+  <title>Micro GPT (TensorFlow.js) Demo</title>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
   <style>
     :root {
       color-scheme: dark;
-      --bg: #090d1d;
-      --card: #131b35;
-      --line: #2d3c72;
-      --text: #e9eeff;
-      --muted: #9eb0e5;
-      --good: #58f2a3;
-      --warn: #ffd166;
+      --bg: #0b1020;
+      --card: #121a32;
+      --line: #2c3e78;
+      --text: #e8edff;
+      --muted: #9aa8d9;
+      --btn: #26469b;
+      --btn-hover: #335fce;
     }
-    body { font-family: Inter, Arial, sans-serif; margin: 0; background: var(--bg); color: var(--text); }
-    .container { max-width: 1280px; margin: 0 auto; padding: 16px; }
-    .controls { display: grid; gap: 10px; grid-template-columns: repeat(6, minmax(120px, 1fr)); background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Inter, Arial, sans-serif; background: var(--bg); color: var(--text); }
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 16px; }
+    h1 { margin-top: 0; }
+    .small { color: var(--muted); font-size: 13px; }
+    .controls {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(6, minmax(120px, 1fr));
+    }
     .span-2 { grid-column: span 2; }
     .span-3 { grid-column: span 3; }
     .span-6 { grid-column: span 6; }
-    label { font-size: 12px; color: var(--muted); display:block; margin-bottom:4px; }
-    input, button, textarea { width: 100%; box-sizing: border-box; border-radius: 8px; border: 1px solid var(--line); background:#0f1530; color: var(--text); padding: 8px; }
-    button { cursor: pointer; background: #1d2c63; font-weight: 600; }
-    button:hover { background: #2a428a; }
-    .metrics { display:flex; flex-wrap:wrap; gap:8px; margin: 12px 0; }
-    .metric { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
-    .row { display:grid; gap:12px; grid-template-columns: 2fr 1fr; }
-    .panel, .samples { background: var(--card); border:1px solid var(--line); border-radius:10px; padding:10px; }
-    .panel-grid { display:grid; gap:12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
-    canvas { width:100%; height:180px; background:#090f21; border-radius:8px; border:1px solid #1f2d59; }
-    .samples pre, #log { margin:0; font-size: 12px; line-height:1.35; background:#0b1022; border-radius:8px; border:1px solid #1d2850; padding:8px; max-height:220px; overflow:auto; }
-    .small { color: var(--muted); font-size:12px; }
-    #tooltip { position: fixed; display:none; pointer-events:none; background:#0a1128; border:1px solid #3a4d92; border-radius:6px; padding:6px 8px; font-size:12px; z-index: 99; }
+    label { display: block; font-size: 12px; margin-bottom: 4px; color: var(--muted); }
+    input, button {
+      width: 100%;
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #0c1430;
+      color: var(--text);
+    }
+    button { background: var(--btn); cursor: pointer; font-weight: 600; }
+    button:hover { background: var(--btn-hover); }
+    .metrics { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+    .chip { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+    .row { display: grid; gap: 12px; grid-template-columns: 2fr 1fr; }
+    .panel { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+    .panel-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+    canvas { width: 100%; height: 180px; border: 1px solid #1e2b57; border-radius: 8px; background: #0a1127; }
+    pre {
+      margin: 0;
+      padding: 8px;
+      border: 1px solid #1d2852;
+      border-radius: 8px;
+      background: #0a1024;
+      white-space: pre-wrap;
+      max-height: 220px;
+      overflow: auto;
+      font-size: 12px;
+    }
+    @media (max-width: 920px) {
+      .controls { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
+      .span-2, .span-3, .span-6 { grid-column: span 2; }
+      .row { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
-<div class="container">
+<div class="wrap">
   <h1>Micro GPT Name Model (TensorFlow.js)</h1>
-  <p class="small">Downloads Karpathy's names dataset, trains a tiny GPT-like model in-browser, and visualizes parameter matrices with hover metadata.</p>
+  <p class="small">A clean rewrite: download names, train a tiny GPT-style model in-browser, and visualize matrix snapshots.</p>
 
   <div class="controls">
-    <div><label>Embedding dim</label><input id="nEmbd" type="number" min="8" max="96" value="32"></div>
+    <div><label>Embedding dim</label><input id="nEmbd" type="number" min="8" max="128" step="8" value="32"></div>
     <div><label>Heads</label><input id="nHead" type="number" min="1" max="8" value="4"></div>
     <div><label>Block size</label><input id="blockSize" type="number" min="4" max="24" value="10"></div>
-    <div><label>Batch size</label><input id="batchSize" type="number" min="8" max="256" value="32"></div>
-    <div><label>Learning rate</label><input id="lr" type="number" step="0.0001" value="0.004"></div>
+    <div><label>Batch size</label><input id="batchSize" type="number" min="8" max="512" step="8" value="48"></div>
+    <div><label>Learning rate</label><input id="lr" type="number" step="0.0001" value="0.003"></div>
     <div><label>Total steps</label><input id="totalSteps" type="number" min="10" max="20000" value="1200"></div>
 
-    <div><label>UI updates / sec</label><input id="fps" type="number" min="1" max="30" value="8"></div>
-    <div><label>Evaluate every N steps</label><input id="evalEvery" type="number" min="10" max="2000" value="50"></div>
+    <div><label>Eval every N steps</label><input id="evalEvery" type="number" min="10" max="2000" value="100"></div>
     <div><label>Samples per eval</label><input id="sampleCount" type="number" min="1" max="8" value="3"></div>
-    <div><label>Sampling temperature</label><input id="temperature" type="number" min="0.2" max="2" step="0.1" value="0.8"></div>
-    <div><label>Train split (0-1)</label><input id="trainFrac" type="number" min="0.5" max="0.99" step="0.01" value="0.9"></div>
-    <div><label>Visualize matrix</label><input id="matrixFilter" value="wte,wq,wk,wv,wo,ff1,ff2,lmHead"></div>
+    <div><label>Temperature</label><input id="temperature" type="number" min="0.2" max="2" step="0.1" value="0.9"></div>
+    <div><label>Train split</label><input id="trainFrac" type="number" min="0.5" max="0.99" step="0.01" value="0.9"></div>
+    <div class="span-2"><label>Visualize matrices (comma-separated)</label><input id="matrixFilter" value="wte,wq,wk,wv,wo,ff1,ff2,lmHead"></div>
 
-    <div class="span-3"><button id="presetFastBtn">Fast preset</button></div>
+    <div class="span-3"><button id="presetBtn">Fast preset</button></div>
     <div class="span-3"><button id="loadBtn">1) Download Dataset</button></div>
-    <div><label>Embedding dim</label><input id="nEmbd" type="number" min="8" max="96" value="48"></div>
-    <div><label>Heads</label><input id="nHead" type="number" min="1" max="8" value="4"></div>
-    <div><label>Block size</label><input id="blockSize" type="number" min="4" max="24" value="12"></div>
-    <div><label>Batch size</label><input id="batchSize" type="number" min="8" max="256" value="64"></div>
-    <div><label>Learning rate</label><input id="lr" type="number" step="0.0001" value="0.003"></div>
-    <div><label>Total steps</label><input id="totalSteps" type="number" min="10" max="20000" value="3000"></div>
-
-    <div><label>UI updates / sec</label><input id="fps" type="number" min="1" max="30" value="8"></div>
-    <div><label>Evaluate every N steps</label><input id="evalEvery" type="number" min="10" max="2000" value="200"></div>
-    <div><label>Samples per eval</label><input id="sampleCount" type="number" min="1" max="8" value="4"></div>
-    <div><label>Sampling temperature</label><input id="temperature" type="number" min="0.2" max="2" step="0.1" value="0.9"></div>
-    <div><label>Train split (0-1)</label><input id="trainFrac" type="number" min="0.5" max="0.99" step="0.01" value="0.9"></div>
-    <div><label>Visualize matrix</label><input id="matrixFilter" value="wte,wq,wk,wv,wo,ff1,ff2,lmHead"></div>
-
-    <div class="span-6"><button id="loadBtn">1) Download Dataset</button></div>
     <div class="span-2"><button id="initBtn">2) Initialize Model</button></div>
     <div class="span-2"><button id="startBtn">3) Start Training</button></div>
-    <div class="span-2"><button id="pauseBtn">Pause</button></div>
+    <div class="span-2"><button id="stopBtn">Stop</button></div>
   </div>
 
   <div class="metrics">
-    <div class="metric">Step: <span id="stepOut">0</span></div>
-    <div class="metric">Train loss: <span id="trainLossOut">-</span></div>
-    <div class="metric">Val loss: <span id="valLossOut">-</span></div>
-    <div class="metric">Dataset size: <span id="dataOut">0</span></div>
-    <div class="metric">Vocab size: <span id="vocabOut">0</span></div>
-    <div class="metric">Params: <span id="paramsOut">0</span></div>
-    <div class="metric">Speed: <span id="speedOut">-</span></div>
+    <div class="chip">Names: <span id="dataOut">0</span></div>
+    <div class="chip">Vocab: <span id="vocabOut">0</span></div>
+    <div class="chip">Step: <span id="stepOut">0</span></div>
+    <div class="chip">Train loss: <span id="trainLossOut">-</span></div>
+    <div class="chip">Val loss: <span id="valLossOut">-</span></div>
   </div>
 
   <div class="row">
     <div class="panel">
-      <h3>Parameter matrix heatmaps</h3>
-      <div id="paramPanels" class="panel-grid"></div>
+      <h3>Matrix visualizations</h3>
+      <div id="matrixGrid" class="panel-grid"></div>
     </div>
-    <div class="samples">
-      <h3>Name predictions</h3>
-      <pre id="samplesOut">(run training)</pre>
-      <h3>Next-char predictions (top-5)</h3>
-      <pre id="nextCharOut">(run training)</pre>
+    <div class="panel">
+      <h3>Samples</h3>
+      <pre id="sampleOut">(train to generate names)</pre>
       <h3>Log</h3>
-      <pre id="log"></pre>
+      <pre id="logOut"></pre>
     </div>
   </div>
 </div>
-<div id="tooltip"></div>
+
 <script>
 const DATA_URL = 'https://raw.githubusercontent.com/karpathy/makemore/refs/heads/master/names.txt';
 const BOS = '^';
@@ -114,408 +125,321 @@ const state = {
   names: [], train: [], val: [],
   chars: [], stoi: new Map(), itos: new Map(),
   model: null, optimizer: null,
-  step: 0, running: false, uiTimer: null,
+  running: false, step: 0,
   lastTrainLoss: null, lastValLoss: null,
-  lastSamples: [],
-  lastStepTime: performance.now(),
-  emaSps: 0,
-  canvasMeta: new Map(),
 };
 
-const byId = (id) => document.getElementById(id);
+const $ = (id) => document.getElementById(id);
 const log = (msg) => {
-  const el = byId('log');
+  const el = $('logOut');
   el.textContent += `${new Date().toLocaleTimeString()} ${msg}\n`;
   el.scrollTop = el.scrollHeight;
 };
 
+function updateMetrics() {
+  $('dataOut').textContent = state.names.length;
+  $('vocabOut').textContent = state.chars.length;
+  $('stepOut').textContent = state.step;
+  $('trainLossOut').textContent = state.lastTrainLoss == null ? '-' : state.lastTrainLoss.toFixed(4);
+  $('valLossOut').textContent = state.lastValLoss == null ? '-' : state.lastValLoss.toFixed(4);
+}
+
 async function loadDataset() {
-  byId('loadBtn').disabled = true;
+  $('loadBtn').disabled = true;
   try {
-    const txt = await fetch(DATA_URL).then(r => {
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return r.text();
-    });
+    const res = await fetch(DATA_URL);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const txt = await res.text();
     state.names = txt.split('\n').map(s => s.trim().toLowerCase()).filter(Boolean);
-    if (!state.names.length) throw new Error('No names loaded');
-    log(`Downloaded ${state.names.length} names from Karpathy dataset.`);
-  } catch (e) {
-    state.names = ['emma','olivia','liam','noah','ava','isabella','mia','sofia'];
-    log(`Dataset fetch failed (${e.message}), using fallback mini list.`);
+    log(`Loaded ${state.names.length} names.`);
+  } catch (err) {
+    state.names = ['emma', 'olivia', 'liam', 'noah', 'ava', 'mia', 'luna', 'sofia'];
+    log(`Dataset fetch failed (${err.message}); using fallback names.`);
   } finally {
-    byId('dataOut').textContent = state.names.length;
-    byId('loadBtn').disabled = false;
+    updateMetrics();
+    $('loadBtn').disabled = false;
   }
 }
 
-function prepareVocabAndSplit(trainFrac) {
+function buildVocab(trainFrac) {
   const set = new Set([BOS, EOS]);
   for (const n of state.names) for (const ch of n) set.add(ch);
   state.chars = [...set].sort();
-  state.stoi = new Map(state.chars.map((ch, i) => [ch, i]));
-  state.itos = new Map(state.chars.map((ch, i) => [i, ch]));
-  byId('vocabOut').textContent = state.chars.length;
+  state.stoi = new Map(state.chars.map((c, i) => [c, i]));
+  state.itos = new Map(state.chars.map((c, i) => [i, c]));
 
   const shuffled = [...state.names];
   for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = (Math.random() * (i + 1)) | 0;
+    const j = Math.floor(Math.random() * (i + 1));
     [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
   const split = Math.floor(shuffled.length * trainFrac);
   state.train = shuffled.slice(0, split);
   state.val = shuffled.slice(split);
-  log(`Split dataset: train=${state.train.length}, val=${state.val.length}.`);
+  log(`Split: train=${state.train.length}, val=${state.val.length}.`);
+  updateMetrics();
 }
 
-function randomBatch(splitNames, blockSize, batchSize) {
-  const x = new Int32Array(batchSize * blockSize);
-  const y = new Int32Array(batchSize * blockSize);
+function randomBatch(names, blockSize, batchSize) {
+  const bos = state.stoi.get(BOS);
+  const eos = state.stoi.get(EOS);
+  const xs = new Int32Array(batchSize * blockSize);
+  const ys = new Int32Array(batchSize * blockSize);
+
   for (let b = 0; b < batchSize; b++) {
-    const name = splitNames[(Math.random() * splitNames.length) | 0];
-    const seq = `${BOS}${name}${EOS}`;
-    const ids = [...seq].map(ch => state.stoi.get(ch));
-    const start = 0;
-    const maxStart = Math.max(1, ids.length - 1);
-    const start = (Math.random() * maxStart) | 0;
-    const ctx = Array(blockSize).fill(state.stoi.get(BOS));
+    const name = names[Math.floor(Math.random() * names.length)];
+    const ids = [...`${BOS}${name}${EOS}`].map(ch => state.stoi.get(ch));
+    const start = Math.floor(Math.random() * Math.max(1, ids.length - 1));
     for (let t = 0; t < blockSize; t++) {
-      const srcIdx = start + t;
-      const tgtIdx = srcIdx + 1;
-      const xTok = srcIdx < ids.length ? ids[srcIdx] : state.stoi.get(EOS);
-      const yTok = tgtIdx < ids.length ? ids[tgtIdx] : state.stoi.get(EOS);
-      ctx[t] = xTok;
-      x[b * blockSize + t] = ctx[t];
-      y[b * blockSize + t] = yTok;
+      const src = start + t;
+      const tgt = src + 1;
+      xs[b * blockSize + t] = src < ids.length ? ids[src] : eos;
+      ys[b * blockSize + t] = tgt < ids.length ? ids[tgt] : eos;
+      if (t === 0 && xs[b * blockSize + t] == null) xs[b * blockSize + t] = bos;
     }
   }
+
   return {
-    x: tf.tensor2d(x, [batchSize, blockSize], 'int32'),
-    y: tf.tensor2d(y, [batchSize, blockSize], 'int32'),
+    x: tf.tensor2d(xs, [batchSize, blockSize], 'int32'),
+    y: tf.tensor2d(ys, [batchSize, blockSize], 'int32'),
   };
 }
 
 function createModel(cfg) {
-  const V = state.chars.length, C = cfg.nEmbd, T = cfg.blockSize, H = cfg.nHead, D = C / H;
+  const V = state.chars.length;
+  const C = cfg.nEmbd;
+  const T = cfg.blockSize;
+  const H = cfg.nHead;
+  const D = C / H;
+  if (C % H !== 0) throw new Error('Embedding dim must be divisible by heads.');
+
   const init = (shape, std = 0.02) => tf.variable(tf.randomNormal(shape, 0, std));
-  const model = {
+  return {
     cfg,
     wte: init([V, C]), wpe: init([T, C]),
     wq: init([C, C]), wk: init([C, C]), wv: init([C, C]), wo: init([C, C]),
     ff1: init([C, C * 4]), ff2: init([C * 4, C]),
     lmHead: init([C, V]),
+
     vars() {
       return [this.wte, this.wpe, this.wq, this.wk, this.wv, this.wo, this.ff1, this.ff2, this.lmHead];
     },
+
     forward(x) {
       return tf.tidy(() => {
         const B = x.shape[0];
-        const tokEmb = tf.gather(this.wte, x);
-        const posIdx = tf.range(0, T, 1, 'int32');
-        const posEmb = tf.gather(this.wpe, posIdx).expandDims(0).tile([B, 1, 1]);
-        let h = tokEmb.add(posEmb);
+        const tok = tf.gather(this.wte, x);
+        const pos = tf.gather(this.wpe, tf.range(0, T, 1, 'int32')).expandDims(0).tile([B, 1, 1]);
+        let h = tok.add(pos);
 
         const flat = h.reshape([B * T, C]);
-        const q = flat.matMul(this.wq).reshape([B, T, H, D]).transpose([0,2,1,3]);
-        const k = flat.matMul(this.wk).reshape([B, T, H, D]).transpose([0,2,1,3]);
-        const v = flat.matMul(this.wv).reshape([B, T, H, D]).transpose([0,2,1,3]);
+        const q = flat.matMul(this.wq).reshape([B, T, H, D]).transpose([0, 2, 1, 3]);
+        const k = flat.matMul(this.wk).reshape([B, T, H, D]).transpose([0, 2, 1, 3]);
+        const v = flat.matMul(this.wv).reshape([B, T, H, D]).transpose([0, 2, 1, 3]);
 
         let att = q.matMul(k, false, true).div(Math.sqrt(D));
-        const mask = tf.linalg.bandPart(tf.ones([T, T]), -1, 0).reshape([1,1,T,T]);
-        const negInf = tf.fill([1,1,T,T], -1e9);
-        att = tf.where(mask.cast('bool'), att, negInf);
+        const mask = tf.linalg.bandPart(tf.ones([T, T]), -1, 0).reshape([1, 1, T, T]);
+        const neg = tf.fill([1, 1, T, T], -1e9);
+        att = tf.where(mask.cast('bool'), att, neg);
         const w = tf.softmax(att, -1);
-        const ctx = w.matMul(v).transpose([0,2,1,3]).reshape([B*T, C]).matMul(this.wo).reshape([B,T,C]);
-        h = h.add(ctx);
+        const ctx = w.matMul(v).transpose([0, 2, 1, 3]).reshape([B * T, C]).matMul(this.wo).reshape([B, T, C]);
 
-        const ff = h.reshape([B*T, C]).matMul(this.ff1).relu().matMul(this.ff2).reshape([B,T,C]);
+        h = h.add(ctx);
+        const ff = h.reshape([B * T, C]).matMul(this.ff1).relu().matMul(this.ff2).reshape([B, T, C]);
         h = h.add(ff);
-        const logits = h.reshape([B*T, C]).matMul(this.lmHead).reshape([B, T, V]);
-        return logits;
+
+        return h.reshape([B * T, C]).matMul(this.lmHead).reshape([B, T, V]);
       });
     },
+
     loss(x, y) {
       return tf.tidy(() => {
-        const logits = this.forward(x);
-        const flatLogits = logits.reshape([x.shape[0] * x.shape[1], state.chars.length]);
-        const flatY = y.reshape([x.shape[0] * x.shape[1]]);
-        const oneHot = tf.oneHot(flatY, state.chars.length);
-        const loss = tf.losses.softmaxCrossEntropy(oneHot, flatLogits).mean();
-        return loss;
+        const logits = this.forward(x).reshape([x.shape[0] * x.shape[1], V]);
+        const labels = y.reshape([x.shape[0] * x.shape[1]]);
+        const oneHot = tf.oneHot(labels, V);
+        return tf.losses.softmaxCrossEntropy(oneHot, logits).mean();
       });
-    }
+    },
   };
-  return model;
 }
 
-function matrixStats(arr) {
-  let min = Infinity, max = -Infinity, sum = 0;
-  for (const v of arr) { min = Math.min(min, v); max = Math.max(max, v); sum += v; }
-  return { min, max, mean: sum / arr.length };
-}
-
-function drawMatrix(canvas, values, rows, cols, name) {
+function drawHeatmap(canvas, arr, rows, cols) {
   const ctx = canvas.getContext('2d');
   const px = 6;
   canvas.width = Math.max(120, cols * px);
   canvas.height = Math.max(80, rows * px);
-  const { min, max, mean } = matrixStats(values);
-  const scale = Math.max(Math.abs(min), Math.abs(max), 1e-6);
+
+  let min = Infinity, max = -Infinity;
+  for (const v of arr) { min = Math.min(min, v); max = Math.max(max, v); }
+  const scale = (v) => (v - min) / (max - min + 1e-9);
 
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      const idx = r * cols + c;
-      const v = values[idx] / scale;
-      const red = v > 0 ? Math.floor(255 * v) : 10;
-      const blue = v < 0 ? Math.floor(-255 * v) : 10;
-      const green = 30 + Math.floor((1 - Math.abs(v)) * 45);
-      ctx.fillStyle = `rgb(${red},${green},${blue})`;
+      const v = arr[r * cols + c];
+      const t = scale(v);
+      const rr = Math.floor(25 + t * 220);
+      const bb = Math.floor(245 - t * 220);
+      ctx.fillStyle = `rgb(${rr}, 75, ${bb})`;
       ctx.fillRect(c * px, r * px, px, px);
     }
   }
-  ctx.strokeStyle = '#2d3c72';
-  ctx.strokeRect(0, 0, canvas.width, canvas.height);
-
-  state.canvasMeta.set(canvas.id, { values, rows, cols, px, name, min, max, mean });
 }
 
-function renderPanels() {
-  const root = byId('paramPanels');
-  root.innerHTML = '';
-  const wanted = byId('matrixFilter').value.split(',').map(s => s.trim()).filter(Boolean);
-  const show = new Set(wanted);
-  for (const key of Object.keys(state.model).filter(k => state.model[k] instanceof tf.Variable)) {
-    if (!show.has(key)) continue;
+async function renderMatrices() {
+  if (!state.model) return;
+  const wanted = $('matrixFilter').value.split(',').map(s => s.trim()).filter(Boolean);
+  const grid = $('matrixGrid');
+  grid.innerHTML = '';
+
+  for (const key of wanted) {
+    const tensor = state.model[key];
+    if (!tensor) continue;
+    const vals = await tensor.data();
+    const shape = tensor.shape;
+    const rows = shape[0] || 1;
+    const cols = shape[1] || 1;
+
     const panel = document.createElement('div');
     panel.className = 'panel';
-    panel.innerHTML = `<div class="small">${key}</div><canvas id="cv-${key}"></canvas>`;
-    root.appendChild(panel);
+    panel.innerHTML = `<div class="small"><b>${key}</b> [${shape.join(' × ')}]</div>`;
+    const canvas = document.createElement('canvas');
+    panel.appendChild(canvas);
+    grid.appendChild(panel);
+    drawHeatmap(canvas, vals, rows, cols);
   }
 }
 
-async function updateVisuals() {
-  if (!state.model) return;
-  for (const key of Object.keys(state.model).filter(k => state.model[k] instanceof tf.Variable)) {
-    const cv = byId(`cv-${key}`);
-    if (!cv) continue;
-    const v = state.model[key];
-    const data = await v.data();
-    const [rows, cols] = v.shape.length === 2 ? v.shape : [1, v.shape[0]];
-    drawMatrix(cv, data, rows, cols, key);
-  }
-}
+async function sampleName(temperature = 1.0, maxLen = 20) {
+  if (!state.model) return '';
+  const bos = state.stoi.get(BOS);
+  const eos = state.stoi.get(EOS);
+  const blockSize = state.model.cfg.blockSize;
+  const tokens = [bos];
 
-async function evaluateLoss(split = 'val') {
-  if (!state.model) return null;
-  const cfg = state.model.cfg;
-  const names = split === 'val' && state.val.length ? state.val : state.train;
-  const { x, y } = randomBatch(names, cfg.blockSize, Math.min(128, cfg.batchSize));
-  const val = tf.tidy(() => state.model.loss(x, y));
-  const num = (await val.data())[0];
-  x.dispose(); y.dispose(); val.dispose();
-  return num;
-}
-
-async function sampleOne(maxLen = 24, temperature = 1.0) {
-  const cfg = state.model.cfg;
-  let context = Array(cfg.blockSize).fill(state.stoi.get(BOS));
-  let out = '';
   for (let i = 0; i < maxLen; i++) {
-    const x = tf.tensor2d(context, [1, cfg.blockSize], 'int32');
-    const logits = tf.tidy(() => state.model.forward(x).slice([0, cfg.blockSize - 1, 0], [1, 1, state.chars.length]).reshape([state.chars.length]).div(temperature));
-    const probs = tf.softmax(logits);
-    const sampleId = (await tf.multinomial(probs, 1).data())[0];
-    x.dispose(); logits.dispose(); probs.dispose();
-    const ch = state.itos.get(sampleId);
-    if (ch === EOS) break;
-    if (ch !== BOS) out += ch;
-    context = context.slice(1).concat(sampleId);
-  }
-  return out || '(empty)';
-}
+    const ctx = new Int32Array(blockSize).fill(bos);
+    const recent = tokens.slice(-blockSize);
+    ctx.set(recent, blockSize - recent.length);
 
-async function sampleNames() {
-  const n = Number(byId('sampleCount').value);
-  const temperature = Number(byId('temperature').value);
-  const arr = [];
-  for (let i = 0; i < n; i++) arr.push(await sampleOne(24, temperature));
-  state.lastSamples = arr;
-  byId('samplesOut').textContent = arr.map((s, i) => `${i + 1}. ${s}`).join('\n');
-}
-
-async function nextCharPredictions() {
-  const prompts = ['a', 'ma', 'jo', 'el'];
-  const cfg = state.model.cfg;
-  const outLines = [];
-  for (const prompt of prompts) {
-    const ids = [...(`${BOS}${prompt}`)].map(ch => state.stoi.get(ch) ?? state.stoi.get(BOS));
-    const ctx = Array(cfg.blockSize).fill(state.stoi.get(BOS));
-    for (let i = 0; i < Math.min(cfg.blockSize, ids.length); i++) {
-      ctx[cfg.blockSize - Math.min(cfg.blockSize, ids.length) + i] = ids[i];
-    }
-    const x = tf.tensor2d(ctx, [1, cfg.blockSize], 'int32');
-    const probs = tf.tidy(() => {
-      const logits = state.model.forward(x).slice([0, cfg.blockSize - 1, 0], [1, 1, state.chars.length]).reshape([state.chars.length]);
-      return tf.softmax(logits);
+    const next = tf.tidy(() => {
+      const x = tf.tensor2d(ctx, [1, blockSize], 'int32');
+      const logits = state.model.forward(x).slice([0, blockSize - 1, 0], [1, 1, -1]).reshape([state.chars.length]);
+      const scaled = logits.div(tf.scalar(Math.max(0.1, temperature)));
+      const probs = tf.softmax(scaled);
+      return tf.multinomial(probs, 1).dataSync()[0];
     });
-    const data = await probs.data();
-    x.dispose(); probs.dispose();
 
-    const top = [...data]
-      .map((p, i) => ({ ch: state.itos.get(i), p }))
-      .filter(x => x.ch !== BOS)
-      .sort((a, b) => b.p - a.p)
-      .slice(0, 5)
-      .map(x => `${x.ch}:${(x.p * 100).toFixed(1)}%`)
-      .join('  ');
-    outLines.push(`${prompt} -> ${top}`);
+    if (next === eos) break;
+    tokens.push(next);
   }
-  byId('nextCharOut').textContent = outLines.join('\n');
+
+  return tokens.slice(1).map(id => state.itos.get(id)).join('');
 }
 
-async function trainLoop() {
-  const cfg = state.model.cfg;
-  const evalEvery = Number(byId('evalEvery').value);
-  const fps = Number(byId('fps').value);
-  const uiEveryMs = 1000 / fps;
-  let lastUi = 0;
-
-  while (state.running && state.step < cfg.totalSteps) {
-    const { x, y } = randomBatch(state.train, cfg.blockSize, cfg.batchSize);
-    const lossTensor = state.optimizer.minimize(() => state.model.loss(x, y), true, state.model.vars());
-    const loss = (await lossTensor.data())[0];
-    x.dispose(); y.dispose(); lossTensor.dispose();
-
-    state.lastTrainLoss = loss;
-    state.step += 1;
-
-    const t = performance.now();
-    const dt = Math.max(1e-3, (t - state.lastStepTime) / 1000);
-    const sps = 1 / dt;
-    state.emaSps = state.emaSps ? (0.9 * state.emaSps + 0.1 * sps) : sps;
-    state.lastStepTime = t;
-
-    const now = performance.now();
-    if (now - lastUi > uiEveryMs) {
-      byId('stepOut').textContent = state.step;
-      byId('trainLossOut').textContent = state.lastTrainLoss.toFixed(4);
-      byId('speedOut').textContent = `${state.emaSps.toFixed(1)} steps/s`;
-      lastUi = now;
-      await tf.nextFrame();
-      lastUi = now;
-    }
-
-    if (state.step % evalEvery === 0 || state.step === 1) {
-      state.lastValLoss = await evaluateLoss('val');
-      byId('valLossOut').textContent = state.lastValLoss.toFixed(4);
-      await sampleNames();
-      await nextCharPredictions();
-      await updateVisuals();
-      log(`step=${state.step} train=${state.lastTrainLoss.toFixed(4)} val=${state.lastValLoss.toFixed(4)}`);
-      await tf.nextFrame();
-    }
-  }
-  if (state.step >= cfg.totalSteps) {
-    state.running = false;
-    log('Training finished.');
-  }
+async function validateLoss(cfg) {
+  const batch = randomBatch(state.val.length ? state.val : state.train, cfg.blockSize, Math.max(8, Math.floor(cfg.batchSize / 2)));
+  const val = tf.tidy(() => state.model.loss(batch.x, batch.y).dataSync()[0]);
+  batch.x.dispose();
+  batch.y.dispose();
+  return val;
 }
 
-function attachHover() {
-  const tip = byId('tooltip');
-  byId('paramPanels').addEventListener('mousemove', (e) => {
-    const target = e.target;
-    if (!(target instanceof HTMLCanvasElement)) return;
-    const meta = state.canvasMeta.get(target.id);
-    if (!meta) return;
-
-    const rect = target.getBoundingClientRect();
-    const sx = target.width / rect.width;
-    const sy = target.height / rect.height;
-    const x = Math.floor((e.clientX - rect.left) * sx);
-    const y = Math.floor((e.clientY - rect.top) * sy);
-    const c = Math.floor(x / meta.px), r = Math.floor(y / meta.px);
-    if (r < 0 || c < 0 || r >= meta.rows || c >= meta.cols) return;
-    const idx = r * meta.cols + c;
-    const v = meta.values[idx];
-
-    tip.style.display = 'block';
-    tip.style.left = `${e.clientX + 14}px`;
-    tip.style.top = `${e.clientY + 14}px`;
-    tip.innerHTML = `<b>${meta.name}</b><br>row=${r}, col=${c}<br>value=${v.toFixed(5)}<br>matrix mean=${meta.mean.toFixed(5)}<br>range=[${meta.min.toFixed(4)}, ${meta.max.toFixed(4)}]`;
-  });
-  byId('paramPanels').addEventListener('mouseleave', () => { tip.style.display = 'none'; });
-}
-
-function countParams(model) {
-  return model.vars().reduce((acc, v) => acc + v.size, 0);
-}
-
-async function initModel() {
-  if (!state.names.length) await loadDataset();
-  const nEmbd = Number(byId('nEmbd').value);
-  const nHead = Number(byId('nHead').value);
-  if (nEmbd % nHead !== 0) {
-    alert('Embedding dim must be divisible by number of heads.');
-    return;
-  }
-  prepareVocabAndSplit(Number(byId('trainFrac').value));
-  if (state.model) {
-    state.model.vars().forEach(v => v.dispose());
-  }
-  state.model = createModel({
-    nEmbd,
-    nHead,
-    blockSize: Number(byId('blockSize').value),
-    batchSize: Number(byId('batchSize').value),
-    lr: Number(byId('lr').value),
-    totalSteps: Number(byId('totalSteps').value),
-  });
-  state.optimizer = tf.train.adam(state.model.cfg.lr);
-  state.step = 0;
-  byId('stepOut').textContent = '0';
-  byId('trainLossOut').textContent = '-';
-  byId('valLossOut').textContent = '-';
-  byId('samplesOut').textContent = '(run training)';
-  byId('nextCharOut').textContent = '(run training)';
-  byId('paramsOut').textContent = countParams(state.model).toLocaleString();
-  state.lastStepTime = performance.now();
-  state.emaSps = 0;
-  byId('paramsOut').textContent = countParams(state.model).toLocaleString();
-  renderPanels();
-  await updateVisuals();
-  log('Model initialized.');
-}
-
-function setFastPreset() {
-  byId('nEmbd').value = 32;
-  byId('nHead').value = 4;
-  byId('blockSize').value = 10;
-  byId('batchSize').value = 32;
-  byId('lr').value = 0.004;
-  byId('totalSteps').value = 1200;
-  byId('evalEvery').value = 50;
-  byId('sampleCount').value = 3;
-  byId('temperature').value = 0.8;
-  log('Applied fast preset.');
-}
-
-byId('presetFastBtn').onclick = setFastPreset;
-byId('loadBtn').onclick = loadDataset;
-byId('initBtn').onclick = initModel;
-byId('startBtn').onclick = async () => {
-  if (!state.model) await initModel();
-  if (state.running) return;
+async function train() {
+  if (!state.model) throw new Error('Initialize model first.');
+  const cfg = readCfg();
   state.running = true;
-  log('Training started.');
-  trainLoop();
-};
-byId('pauseBtn').onclick = () => {
+  $('startBtn').disabled = true;
+
+  for (; state.step < cfg.totalSteps && state.running; state.step++) {
+    const batch = randomBatch(state.train, cfg.blockSize, cfg.batchSize);
+    const lossT = state.optimizer.minimize(() => state.model.loss(batch.x, batch.y), true, state.model.vars());
+    state.lastTrainLoss = (await lossT.data())[0];
+    batch.x.dispose();
+    batch.y.dispose();
+    lossT.dispose();
+
+    if ((state.step + 1) % cfg.evalEvery === 0) {
+      state.lastValLoss = await validateLoss(cfg);
+      const samples = [];
+      for (let i = 0; i < cfg.sampleCount; i++) {
+        samples.push(await sampleName(cfg.temperature));
+      }
+      $('sampleOut').textContent = samples.join('\n');
+      await renderMatrices();
+      log(`step=${state.step + 1} train=${state.lastTrainLoss.toFixed(4)} val=${state.lastValLoss.toFixed(4)}`);
+    }
+
+    if ((state.step + 1) % 10 === 0) updateMetrics();
+    await tf.nextFrame();
+  }
+
+  updateMetrics();
   state.running = false;
-  log('Training paused.');
+  $('startBtn').disabled = false;
+  log('Training stopped.');
+}
+
+function readCfg() {
+  return {
+    nEmbd: Number($('nEmbd').value),
+    nHead: Number($('nHead').value),
+    blockSize: Number($('blockSize').value),
+    batchSize: Number($('batchSize').value),
+    lr: Number($('lr').value),
+    totalSteps: Number($('totalSteps').value),
+    evalEvery: Number($('evalEvery').value),
+    sampleCount: Number($('sampleCount').value),
+    temperature: Number($('temperature').value),
+    trainFrac: Number($('trainFrac').value),
+  };
+}
+
+$('presetBtn').onclick = () => {
+  $('nEmbd').value = '24';
+  $('nHead').value = '3';
+  $('blockSize').value = '8';
+  $('batchSize').value = '32';
+  $('lr').value = '0.004';
+  $('totalSteps').value = '400';
+  $('evalEvery').value = '50';
+  $('sampleCount').value = '3';
+  $('temperature').value = '0.9';
+  log('Applied fast preset.');
 };
 
-attachHover();
-loadDataset();
+$('loadBtn').onclick = loadDataset;
+
+$('initBtn').onclick = async () => {
+  if (!state.names.length) await loadDataset();
+  const cfg = readCfg();
+  buildVocab(cfg.trainFrac);
+
+  if (state.model) state.model.vars().forEach(v => v.dispose());
+  state.model = createModel(cfg);
+  state.optimizer = tf.train.adam(cfg.lr);
+  state.step = 0;
+  state.lastTrainLoss = null;
+  state.lastValLoss = null;
+  $('sampleOut').textContent = '(train to generate names)';
+  await renderMatrices();
+  updateMetrics();
+  log('Model initialized.');
+};
+
+$('startBtn').onclick = async () => {
+  try { await train(); }
+  catch (err) {
+    log(`Error: ${err.message}`);
+    state.running = false;
+    $('startBtn').disabled = false;
+  }
+};
+
+$('stopBtn').onclick = () => {
+  state.running = false;
+};
+
+updateMetrics();
 </script>
 </body>
 </html>
