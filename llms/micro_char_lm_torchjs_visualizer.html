@@ -129,11 +129,19 @@
     // -----------------------------
     const VOCAB = " abcdefghijklmnopqrstuvwxyz0123456789";
     const V = VOCAB.length;
-    const CORPUS_URL = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt";
+    const CORPUS_URLS = [
+      "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt",
+      "https://cdn.jsdelivr.net/gh/karpathy/char-rnn@master/data/tinyshakespeare/input.txt"
+    ];
 
     const xData = [];
     const yData = [];
     let corpusReady = false;
+
+    function setCorpusReadyUI(ready) {
+      document.getElementById("startBtn").disabled = !ready;
+      document.getElementById("sampleBtn").disabled = !ready;
+    }
 
     function normalizeCorpus(text) {
       return text
@@ -145,10 +153,28 @@
 
     async function loadCorpusFromRepo() {
       const statusEl = document.getElementById("dataStatus");
+      statusEl.textContent = "Loading natural English corpus from GitHub...";
+      setCorpusReadyUI(false);
+
       try {
-        const resp = await fetch(CORPUS_URL, { cache: "no-store" });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const rawText = await resp.text();
+        let rawText = "";
+        let sourceUrl = "";
+        let lastErr = null;
+
+        for (const url of CORPUS_URLS) {
+          try {
+            const resp = await fetch(url, { cache: "no-store" });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            rawText = await resp.text();
+            sourceUrl = url;
+            break;
+          } catch (err) {
+            lastErr = err;
+          }
+        }
+
+        if (!rawText) throw lastErr || new Error("No corpus URL succeeded");
+
         const corpus = normalizeCorpus(rawText);
         if (corpus.length < 2000) throw new Error("Corpus too small after normalization");
 
@@ -164,10 +190,12 @@
         }
 
         corpusReady = xData.length > 10;
-        statusEl.textContent = `Loaded natural English text from GitHub (${corpus.length.toLocaleString()} chars normalized). Vocabulary constrained to [a-z0-9 ].`;
+        setCorpusReadyUI(corpusReady);
+        statusEl.textContent = `Loaded natural English text from repo (${corpus.length.toLocaleString()} chars normalized). Source: ${sourceUrl}. Vocabulary constrained to [a-z0-9 ].`;
       } catch (err) {
         corpusReady = false;
-        statusEl.textContent = `Failed to load corpus from GitHub repo: ${err.message}. Please allow network and press Reset.`;
+        setCorpusReadyUI(false);
+        statusEl.textContent = `Failed to load corpus from public repo: ${err.message}. Please allow network and press Reset.`;
       }
     }
 
@@ -457,6 +485,7 @@
     };
 
     initModel();
+    setCorpusReadyUI(false);
     sampleEl.textContent = "waiting for corpus download...";
     redraw();
     loadCorpusFromRepo();
