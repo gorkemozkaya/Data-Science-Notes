@@ -19,3 +19,13 @@ Features:
 - Downloads Karpathy's `names.txt` dataset and trains a tiny character-level GPT-like model in the browser.
 - Displays train/validation loss and generated name predictions every configurable number of steps.
 - Visualizes parameter matrices as heatmaps with mouseover tooltips (row/column/value plus matrix statistics).
+
+### 3) JS PyTorch-style micro char LM (2D embeddings)
+
+Open `micro_char_lm_torchjs_visualizer.html` for a very small, educational next-character language model implemented in plain JavaScript with PyTorch-style tensor math.
+
+Features:
+- Uses a constrained vocabulary: lowercase ASCII letters, digits, and space.
+- Learns **2D character embeddings** and displays them live during training.
+- Predicts next-character probabilities for a selected input character.
+- Shows training loss and sampled representative text as the model improves.
