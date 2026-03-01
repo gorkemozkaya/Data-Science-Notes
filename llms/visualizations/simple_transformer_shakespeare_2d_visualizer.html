@@ -267,7 +267,9 @@ The appetite may sicken, and so die.
       const lossTensor = state.model.opt.minimize(() => {
         const logits = forward(batch.x);
         const labels = batch.y.flatten();
-        const loss = tf.losses.sparseCategoricalCrossentropy(labels, logits.reshape([cfg.batchSize * cfg.blockSize, state.V]), { fromLogits: true }).mean();
+        const flatLogits = logits.reshape([cfg.batchSize * cfg.blockSize, state.V]);
+        const oneHot = tf.oneHot(labels, state.V);
+        const loss = tf.losses.softmaxCrossEntropy(oneHot, flatLogits).mean();
         return loss;
       }, true, state.model.vars);
       const lossVal = lossTensor.dataSync()[0];
