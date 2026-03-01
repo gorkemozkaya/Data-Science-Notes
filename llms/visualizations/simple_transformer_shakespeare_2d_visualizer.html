@@ -244,10 +244,11 @@ The appetite may sicken, and so die.
         const tok = tf.gather(m.tokenEmb, x.flatten()).reshape([B, T, D]);
         const pos = tf.gather(m.posEmb, tf.range(0, T, 1, "int32")).expandDims(0).tile([B, 1, 1]);
         const h = tok.add(pos);
+        const h2d = h.reshape([B * T, D]);
 
-        const q = h.matMul(m.Wq);
-        const k = h.matMul(m.Wk);
-        const v = h.matMul(m.Wv);
+        const q = h2d.matMul(m.Wq).reshape([B, T, D]);
+        const k = h2d.matMul(m.Wk).reshape([B, T, D]);
+        const v = h2d.matMul(m.Wv).reshape([B, T, D]);
 
         const kt = k.transpose([0, 2, 1]);
         const scores = q.matMul(kt).div(Math.sqrt(D));
