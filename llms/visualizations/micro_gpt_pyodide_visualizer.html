@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Micro GPT Pyodide Visualizer</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background:#0b1020; color:#e8eefc; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 16px; }
+    .controls { display:grid; grid-template-columns: repeat(6, minmax(120px,1fr)); gap:12px; background:#121a33; padding:12px; border-radius:10px; }
+    label { font-size: 12px; color:#9db0e0; display:block; margin-bottom:4px; }
+    input, textarea, button { width:100%; box-sizing:border-box; border-radius:6px; border:1px solid #2a3c70; background:#0f1730; color:#e8eefc; padding:8px; }
+    button { cursor:pointer; background:#1d2c5a; font-weight:600; }
+    button:hover { background:#274081; }
+    button:disabled { opacity: 0.6; cursor: wait; }
+    .span-2 { grid-column: span 2; }
+    .span-6 { grid-column: span 6; }
+    .metrics { display:flex; gap:20px; margin:12px 0; flex-wrap:wrap; }
+    .metric { background:#121a33; padding:8px 12px; border-radius:8px; }
+    .panel-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:12px; }
+    .param-card { background:#121a33; border-radius:10px; padding:10px; }
+    .param-title { font-size:13px; margin:0 0 8px; color:#c8d5fb; }
+    canvas { width:100%; height:180px; border-radius:6px; background:#0a0f20; }
+    #log { font-family: monospace; font-size:12px; background:#10162c; border-radius:8px; padding:8px; max-height:180px; overflow:auto; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.27.2/full/pyodide.js"></script>
+</head>
+<body>
+<div class="container">
+  <h1>Micro GPT (Pyodide) Training Visualizer</h1>
+  <p>Runs a tiny GPT-like model in Python via Pyodide directly in your browser and paints trainable matrices as heatmaps.</p>
+
+  <div class="controls">
+    <div><label>Embedding dim</label><input id="nEmbd" type="number" min="4" max="24" value="12" /></div>
+    <div><label>Heads</label><input id="nHead" type="number" min="1" max="4" value="3" /></div>
+    <div><label>Block size</label><input id="blockSize" type="number" min="4" max="20" value="10" /></div>
+    <div><label>Learning rate</label><input id="lr" type="number" step="0.001" value="0.02" /></div>
+    <div><label>Step / second</label><input id="speed" type="number" min="1" max="30" value="5" /></div>
+    <div><label>Total steps</label><input id="totalSteps" type="number" min="1" max="5000" value="400" /></div>
+
+    <div class="span-6">
+      <label>Dataset (one training document per line)</label>
+      <textarea id="dataset" rows="4">hello
+micro
+model
+matrix
+vector
+attention
+visualize
+token
+training
+gradient</textarea>
+    </div>
+
+    <div><button id="initBtn">Initialize</button></div>
+    <div><button id="startBtn">Start</button></div>
+    <div><button id="pauseBtn">Pause</button></div>
+    <div><button id="stepBtn">Single Step</button></div>
+    <div><button id="resetBtn">Reset</button></div>
+  </div>
+
+  <div class="metrics">
+    <div class="metric">Step: <span id="stepOut">0</span></div>
+    <div class="metric">Loss: <span id="lossOut">-</span></div>
+    <div class="metric">Vocab size: <span id="vocabOut">-</span></div>
+  </div>
+
+  <div id="paramPanels" class="panel-grid"></div>
+  <h3>Training log</h3>
+  <div id="log"></div>
+</div>
+
+<script>
+const PY_SRC = `
+import json
+import math
+import random
+
+STATE = None
+
+class Value:
+    def __init__(self, data, children=None, local_grads=None):
+        self.data = float(data)
+        self.grad = 0.0
+        self._children = children or []
+        self._local_grads = local_grads or []
+
+    def add(self, other):
+        o = other if isinstance(other, Value) else Value(other)
+        return Value(self.data + o.data, [self, o], [1.0, 1.0])
+
+    def mul(self, other):
+        o = other if isinstance(other, Value) else Value(other)
+        return Value(self.data * o.data, [self, o], [o.data, self.data])
+
+    def pow(self, p):
+        return Value(self.data ** p, [self], [p * (self.data ** (p - 1))])
+
+    def exp(self):
+        e = math.exp(self.data)
+        return Value(e, [self], [e])
+
+    def log(self):
+        x = max(self.data, 1e-12)
+        return Value(math.log(x), [self], [1.0 / x])
+
+    def relu(self):
+        return Value(max(0.0, self.data), [self], [1.0 if self.data > 0 else 0.0])
+
+    def neg(self):
+        return self.mul(-1.0)
+
+    def sub(self, other):
+        return self.add(other.neg() if isinstance(other, Value) else -other)
+
+    def div(self, other):
+        o = other if isinstance(other, Value) else Value(other)
+        return self.mul(o.pow(-1.0))
+
+    def backward(self):
+        topo = []
+        seen = set()
+
+        def build(v):
+            if id(v) in seen:
+                return
+            seen.add(id(v))
+            for c in v._children:
+                build(c)
+            topo.append(v)
+
+        build(self)
+        self.grad = 1.0
+        for v in reversed(topo):
+            for i, c in enumerate(v._children):
+                c.grad += v._local_grads[i] * v.grad
+
+
+def randn(std=0.08):
+    u = 1 - random.random()
+    v = random.random()
+    return std * math.sqrt(-2 * math.log(u)) * math.cos(2 * math.pi * v)
+
+
+def matrix(nout, nin, std=0.08):
+    return [[Value(randn(std)) for _ in range(nin)] for _ in range(nout)]
+
+
+def linear(x, w):
+    out = []
+    for row in w:
+        s = Value(0)
+        for i, wi in enumerate(row):
+            s = s.add(wi.mul(x[i]))
+        out.append(s)
+    return out
+
+
+def softmax(logits):
+    m = max(v.data for v in logits)
+    ex = [v.sub(m).exp() for v in logits]
+    total = Value(0)
+    for e in ex:
+        total = total.add(e)
+    return [e.div(total) for e in ex]
+
+
+def rmsnorm(x):
+    ms = Value(0)
+    for xi in x:
+        ms = ms.add(xi.mul(xi))
+    ms = ms.div(len(x))
+    scale = ms.add(1e-5).pow(-0.5)
+    return [xi.mul(scale) for xi in x]
+
+
+def tokenize(doc, uchars, bos):
+    return [bos] + [uchars.index(ch) for ch in doc if ch in uchars] + [bos]
+
+
+def _matrices():
+    return {
+        name: [[cell.data for cell in row] for row in mat]
+        for name, mat in STATE["sd"].items()
+    }
+
+
+def get_snapshot():
+    return {
+        "step": STATE["step"],
+        "vocab_size": STATE["vocab_size"],
+        "loss": None,
+        "matrices": _matrices(),
+    }
+
+
+def init_state(cfg_json, docs_json):
+    global STATE
+    cfg = json.loads(cfg_json)
+    docs = json.loads(docs_json)
+    uchars = sorted(set("".join(docs)))
+    bos = len(uchars)
+    vocab_size = len(uchars) + 1
+
+    n_embd = cfg["nEmbd"]
+    n_head = cfg["nHead"]
+    head_dim = n_embd // n_head
+
+    sd = {
+        "wte": matrix(vocab_size, n_embd),
+        "wpe": matrix(cfg["blockSize"], n_embd),
+        "attn_wq": matrix(n_embd, n_embd),
+        "attn_wk": matrix(n_embd, n_embd),
+        "attn_wv": matrix(n_embd, n_embd),
+        "attn_wo": matrix(n_embd, n_embd),
+        "mlp_fc1": matrix(2 * n_embd, n_embd),
+        "mlp_fc2": matrix(n_embd, 2 * n_embd),
+        "lm_head": matrix(vocab_size, n_embd),
+    }
+
+    params = []
+    for mat in sd.values():
+        for row in mat:
+            params.extend(row)
+
+    def gpt(token_id, pos_id, keys, values):
+        x = [t.add(sd["wpe"][pos_id][i]) for i, t in enumerate(sd["wte"][token_id])]
+        x = rmsnorm(x)
+        x_res = x
+
+        q = linear(x, sd["attn_wq"])
+        k = linear(x, sd["attn_wk"])
+        v = linear(x, sd["attn_wv"])
+        keys.append(k)
+        values.append(v)
+
+        x_attn = []
+        for h in range(n_head):
+            hs = h * head_dim
+            qh = q[hs:hs + head_dim]
+            kh = [row[hs:hs + head_dim] for row in keys]
+            vh = [row[hs:hs + head_dim] for row in values]
+
+            logits = []
+            for kt in kh:
+                s = Value(0)
+                for j, kv in enumerate(kt):
+                    s = s.add(qh[j].mul(kv))
+                logits.append(s.div(math.sqrt(head_dim)))
+
+            w = softmax(logits)
+            for j in range(head_dim):
+                out = Value(0)
+                for t, vt in enumerate(vh):
+                    out = out.add(w[t].mul(vt[j]))
+                x_attn.append(out)
+
+        x = [xi.add(x_res[i]) for i, xi in enumerate(linear(x_attn, sd["attn_wo"]))]
+        x_res2 = x
+        x = rmsnorm(x)
+        x = [vv.relu() for vv in linear(x, sd["mlp_fc1"])]
+        x = [xi.add(x_res2[i]) for i, xi in enumerate(linear(x, sd["mlp_fc2"]))]
+        return linear(x, sd["lm_head"])
+
+    STATE = {
+        "cfg": cfg,
+        "docs": docs,
+        "uchars": uchars,
+        "bos": bos,
+        "vocab_size": vocab_size,
+        "sd": sd,
+        "params": params,
+        "step": 0,
+        "gpt": gpt,
+    }
+    return get_snapshot()
+
+
+def train_step():
+    if STATE is None:
+        return {"error": "state not initialized"}
+
+    if STATE["step"] >= STATE["cfg"]["totalSteps"]:
+        snap = get_snapshot()
+        snap["done"] = True
+        return snap
+
+    doc = STATE["docs"][STATE["step"] % len(STATE["docs"])]
+    tokens = tokenize(doc, STATE["uchars"], STATE["bos"])
+    n = min(STATE["cfg"]["blockSize"], len(tokens) - 1)
+
+    keys, values, losses = [], [], []
+    for pos in range(n):
+        logits = STATE["gpt"](tokens[pos], pos, keys, values)
+        probs = softmax(logits)
+        losses.append(probs[tokens[pos + 1]].log().neg())
+
+    loss = Value(0)
+    for l in losses:
+        loss = loss.add(l)
+    loss = loss.div(n)
+    loss.backward()
+
+    lr = STATE["cfg"]["lr"]
+    for p in STATE["params"]:
+        p.data -= lr * p.grad
+        p.grad = 0.0
+
+    STATE["step"] += 1
+    return {
+        "step": STATE["step"],
+        "vocab_size": STATE["vocab_size"],
+        "loss": loss.data,
+        "doc": doc,
+        "done": STATE["step"] >= STATE["cfg"]["totalSteps"],
+        "matrices": _matrices(),
+    }
+`;
+
+let pyodide = null;
+let timer = null;
+let app = null;
+let busy = false;
+
+function logLine(msg) {
+  const log = document.getElementById('log');
+  log.textContent += msg + "\n";
+  log.scrollTop = log.scrollHeight;
+}
+
+function setButtonsDisabled(disabled) {
+  for (const id of ['initBtn', 'startBtn', 'pauseBtn', 'stepBtn', 'resetBtn']) {
+    document.getElementById(id).disabled = disabled;
+  }
+}
+
+async function ensurePyodide() {
+  if (pyodide) return;
+  setButtonsDisabled(true);
+  logLine('Loading Pyodide runtime...');
+  pyodide = await loadPyodide();
+  await pyodide.runPythonAsync(PY_SRC);
+  logLine('Pyodide ready.');
+  setButtonsDisabled(false);
+}
+
+function renderPanels() {
+  const root = document.getElementById('paramPanels');
+  root.innerHTML = '';
+  for (const [name, mat] of Object.entries(app.matrices)) {
+    const card = document.createElement('div');
+    card.className = 'param-card';
+    card.innerHTML = `<h4 class="param-title">${name} (${mat.length}x${mat[0].length})</h4><canvas id="cv-${name}"></canvas>`;
+    root.appendChild(card);
+  }
+}
+
+function drawMatrix(canvas, mat) {
+  const ctx = canvas.getContext('2d');
+  const rows = mat.length, cols = mat[0].length;
+  const vals = mat.flat();
+  const maxAbs = Math.max(1e-6, ...vals.map(v => Math.abs(v)));
+  const W = canvas.width = cols * 8;
+  const H = canvas.height = rows * 8;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const v = mat[r][c] / maxAbs;
+      const red = v > 0 ? Math.floor(255 * v) : 0;
+      const blue = v < 0 ? Math.floor(-255 * v) : 0;
+      ctx.fillStyle = `rgb(${red},20,${blue})`;
+      ctx.fillRect(c * 8, r * 8, 8, 8);
+    }
+  }
+  ctx.strokeStyle = '#2a3c70';
+  ctx.strokeRect(0, 0, W, H);
+}
+
+function drawAll() {
+  if (!app) return;
+  for (const [name, mat] of Object.entries(app.matrices)) {
+    const c = document.getElementById(`cv-${name}`);
+    if (c) drawMatrix(c, mat);
+  }
+}
+
+async function init() {
+  if (busy) return;
+  busy = true;
+  clearInterval(timer);
+  try {
+    await ensurePyodide();
+    const nEmbd = Number(document.getElementById('nEmbd').value);
+    const nHead = Number(document.getElementById('nHead').value);
+    if (nEmbd % nHead !== 0) {
+      alert('Embedding dim must be divisible by number of heads.');
+      return;
+    }
+    const docs = document.getElementById('dataset').value.split('\n').map(x => x.trim()).filter(Boolean);
+    if (!docs.length) {
+      alert('Please provide at least one dataset line.');
+      return;
+    }
+    const cfg = {
+      nEmbd,
+      nHead,
+      blockSize: Number(document.getElementById('blockSize').value),
+      lr: Number(document.getElementById('lr').value),
+      speed: Number(document.getElementById('speed').value),
+      totalSteps: Number(document.getElementById('totalSteps').value),
+    };
+
+    pyodide.globals.set('cfg_json', JSON.stringify(cfg));
+    pyodide.globals.set('docs_json', JSON.stringify(docs));
+    const snapStr = await pyodide.runPythonAsync('json.dumps(init_state(cfg_json, docs_json))');
+    app = JSON.parse(snapStr);
+
+    document.getElementById('vocabOut').textContent = app.vocab_size;
+    document.getElementById('stepOut').textContent = app.step;
+    document.getElementById('lossOut').textContent = '-';
+    document.getElementById('log').textContent = '';
+    renderPanels();
+    drawAll();
+    logLine(`Initialized with ${docs.length} docs (Pyodide/Python backend).`);
+  } catch (err) {
+    logLine(`Initialization error: ${err}`);
+  } finally {
+    busy = false;
+  }
+}
+
+async function stepTrain() {
+  if (busy) return;
+  busy = true;
+  try {
+    const stepStr = await pyodide.runPythonAsync('json.dumps(train_step())');
+    const out = JSON.parse(stepStr);
+    if (out.error) {
+      logLine(`Runtime error: ${out.error}`);
+      return;
+    }
+    app = out;
+    document.getElementById('stepOut').textContent = app.step;
+    document.getElementById('vocabOut').textContent = app.vocab_size;
+    if (typeof app.loss === 'number') {
+      document.getElementById('lossOut').textContent = app.loss.toFixed(4);
+      logLine(`step ${app.step} | doc="${app.doc}" | loss=${app.loss.toFixed(4)}`);
+    }
+    drawAll();
+    if (app.done) clearInterval(timer);
+  } catch (err) {
+    logLine(`Step error: ${err}`);
+    clearInterval(timer);
+  } finally {
+    busy = false;
+  }
+}
+
+document.getElementById('initBtn').onclick = init;
+document.getElementById('startBtn').onclick = async () => {
+  await init();
+  clearInterval(timer);
+  timer = setInterval(stepTrain, 1000 / Number(document.getElementById('speed').value));
+};
+document.getElementById('pauseBtn').onclick = () => clearInterval(timer);
+document.getElementById('stepBtn').onclick = async () => {
+  if (!app) await init();
+  await stepTrain();
+};
+document.getElementById('resetBtn').onclick = init;
+
+init();
+</script>
+</body>
+</html>
