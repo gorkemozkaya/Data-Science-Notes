@@ -106,8 +106,33 @@
 
     const DATA_URLS = [
       "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt",
-      "https://cdn.jsdelivr.net/gh/karpathy/char-rnn@master/data/tinyshakespeare/input.txt"
+      "https://cdn.jsdelivr.net/gh/karpathy/char-rnn@master/data/tinyshakespeare/input.txt",
+      "https://rawcdn.githack.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
     ];
+
+    const FALLBACK_TEXT = `
+From fairest creatures we desire increase,
+That thereby beauty's rose might never die,
+But as the riper should by time decease,
+His tender heir might bear his memory.
+
+To be, or not to be, that is the question:
+Whether 'tis nobler in the mind to suffer
+The slings and arrows of outrageous fortune,
+Or to take arms against a sea of troubles
+And by opposing end them.
+
+All the world's a stage,
+And all the men and women merely players;
+They have their exits and their entrances.
+
+Now is the winter of our discontent
+Made glorious summer by this sun of York.
+
+If music be the food of love, play on;
+Give me excess of it, that, surfeiting,
+The appetite may sicken, and so die.
+`.repeat(12).trim();
 
     const cfg = {
       embDim: 2,
@@ -134,20 +159,25 @@
       return text.replace(/\r/g, "");
     }
 
+    function hydrateDataset(text, sourceLabel) {
+      state.rawText = text;
+      state.text = sanitizeText(state.rawText);
+      const chars = Array.from(new Set([...state.text])).sort();
+      state.chars = chars;
+      state.itos = chars;
+      state.stoi = new Map(chars.map((ch, i) => [ch, i]));
+      state.V = chars.length;
+      return `${state.text.length.toLocaleString()} characters loaded from ${sourceLabel}. Vocab size=${state.V}.`;
+    }
+
     async function loadDataset() {
       const status = document.getElementById("status");
       for (const url of DATA_URLS) {
         try {
           const r = await fetch(url, { cache: "no-store" });
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          state.rawText = await r.text();
-          state.text = sanitizeText(state.rawText);
-          const chars = Array.from(new Set([...state.text])).sort();
-          state.chars = chars;
-          state.itos = chars;
-          state.stoi = new Map(chars.map((ch, i) => [ch, i]));
-          state.V = chars.length;
-          status.textContent = `Loaded ${state.text.length.toLocaleString()} characters from tiny Shakespeare. Vocab size=${state.V}.`;
+          const txt = await r.text();
+          status.textContent = hydrateDataset(txt, `tiny Shakespeare (${url})`);
           document.getElementById("startBtn").disabled = false;
           refreshTrainingSnippet();
           return;
@@ -155,11 +185,18 @@
           status.textContent = `Trying fallback source: ${e.message}`;
         }
       }
-      status.textContent = "Failed to load tiny Shakespeare dataset from available URLs.";
+      status.textContent = `Network dataset download failed. ${hydrateDataset(FALLBACK_TEXT, "embedded Shakespeare fallback")} `;
+      document.getElementById("startBtn").disabled = false;
+      refreshTrainingSnippet();
+    }
+
+    function disposeModel() {
+      if (!state.model) return;
+      for (const v of state.model.vars || []) v.dispose();
     }
 
     function initModel() {
-      if (state.model) state.model.dispose();
+      disposeModel();
       const V = state.V;
       const D = cfg.embDim;
       const B = cfg.blockSize;
