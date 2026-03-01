@@ -257,7 +257,8 @@ The appetite may sicken, and so die.
         const masked = tf.where(mask3.cast("bool"), scores, bigNeg);
         const att = tf.softmax(masked, -1);
         const ctx = att.matMul(v).matMul(m.Wo);
-        const logits = ctx.matMul(m.Wout).add(m.bout);
+        const ctx2d = ctx.reshape([B * T, D]);
+        const logits = ctx2d.matMul(m.Wout).add(m.bout).reshape([B, T, state.V]);
         return logits;
       });
     }
