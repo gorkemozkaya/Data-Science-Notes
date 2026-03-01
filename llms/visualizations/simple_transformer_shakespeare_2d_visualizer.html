@@ -153,6 +153,7 @@ The appetite may sicken, and so die.
       step: 0,
       lossHistory: [],
       running: false,
+      rafId: null,
     };
 
     function sanitizeText(text) {
@@ -274,10 +275,20 @@ The appetite may sicken, and so die.
         const loss = tf.losses.softmaxCrossEntropy(oneHot, flatLogits).mean();
         return loss;
       }, true, state.model.vars);
-      const lossVal = lossTensor.dataSync()[0];
+      const lossVal = lossTensor ? lossTensor.dataSync()[0] : NaN;
       batch.x.dispose();
       batch.y.dispose();
-      lossTensor.dispose();
+      if (lossTensor) lossTensor.dispose();
+
+      if (!Number.isFinite(lossVal)) {
+        state.running = false;
+        if (state.rafId !== null) {
+          cancelAnimationFrame(state.rafId);
+          state.rafId = null;
+        }
+        document.getElementById("status").textContent = "Training paused: non-finite loss encountered. Lower LR and press Start/Resume.";
+        return;
+      }
 
       state.step += 1;
       state.lossHistory.push(lossVal);
@@ -299,7 +310,7 @@ The appetite may sicken, and so die.
     }
 
     function sampleNextFromLogits(logitsRow) {
-      const probs = tf.softmax(logitsRow).dataSync();
+      const probs = tf.tidy(() => Array.from(tf.softmax(logitsRow).dataSync()));
       const r = Math.random();
       let cum = 0;
       for (let i = 0; i < probs.length; i++) {
@@ -388,17 +399,36 @@ The appetite may sicken, and so die.
       if (!state.running) return;
       const steps = Math.max(1, Number(document.getElementById("stepsInput").value) || 1);
       for (let i = 0; i < steps; i++) trainStep();
-      requestAnimationFrame(loop);
+      state.rafId = requestAnimationFrame(loop);
     }
 
     document.getElementById("startBtn").onclick = () => {
+      if (!window.tf) {
+        document.getElementById("status").textContent = "TensorFlow.js failed to load. Check network/CDN access and reload.";
+        return;
+      }
+      if (state.running) return;
       if (!state.model) initModel();
       state.model.opt = tf.train.adam(Number(document.getElementById("lrInput").value));
       state.running = true;
       loop();
     };
-    document.getElementById("pauseBtn").onclick = () => { state.running = false; };
-    document.getElementById("resetBtn").onclick = () => { state.running = false; initModel(); refreshTrainingSnippet(); };
+    document.getElementById("pauseBtn").onclick = () => {
+      state.running = false;
+      if (state.rafId !== null) {
+        cancelAnimationFrame(state.rafId);
+        state.rafId = null;
+      }
+    };
+    document.getElementById("resetBtn").onclick = () => {
+      state.running = false;
+      if (state.rafId !== null) {
+        cancelAnimationFrame(state.rafId);
+        state.rafId = null;
+      }
+      initModel();
+      refreshTrainingSnippet();
+    };
 
     loadDataset().then(() => { if (state.V > 0) initModel(); });
   </script>
