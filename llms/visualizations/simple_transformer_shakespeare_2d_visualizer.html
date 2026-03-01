@@ -258,7 +258,8 @@ The appetite may sicken, and so die.
         const mask3 = mask.expandDims(0).tile([B, 1, 1]);
         const masked = tf.where(mask3.cast("bool"), scores, bigNeg);
         const att = tf.softmax(masked, -1);
-        const ctx = att.matMul(v).matMul(m.Wo);
+        const attOut = att.matMul(v);
+        const ctx = attOut.reshape([B * T, D]).matMul(m.Wo).reshape([B, T, D]);
         const ctx2d = ctx.reshape([B * T, D]);
         const logits = ctx2d.matMul(m.Wout).add(m.bout).reshape([B, T, state.V]);
         return logits;
