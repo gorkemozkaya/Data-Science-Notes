@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Simple Char Transformer (2D Embeddings) - Shakespeare</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b1020;
+      --panel: #141d35;
+      --line: #2d3f6e;
+      --text: #e6eeff;
+      --muted: #9eb0db;
+      --ok: #34d399;
+      --accent: #60a5fa;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      background: radial-gradient(900px 500px at 5% -10%, #1b2750, #0b1020);
+      color: var(--text);
+      padding: 18px;
+    }
+    .wrap { max-width: 1240px; margin: 0 auto; }
+    h1 { margin: 0 0 6px; font-size: 1.55rem; }
+    p { margin: 4px 0; color: var(--muted); }
+    .grid { margin-top: 14px; display: grid; grid-template-columns: 1.35fr 1fr; gap: 14px; }
+    .card {
+      background: linear-gradient(180deg, #182342, #121a32);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+      box-shadow: 0 10px 24px rgba(0,0,0,0.24);
+    }
+    .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+    label { font-size: 0.9rem; color: var(--muted); }
+    button, input {
+      border: 1px solid #3a518c;
+      color: var(--text);
+      background: #0d1530;
+      border-radius: 10px;
+      padding: 8px 10px;
+      font: inherit;
+    }
+    button:hover { border-color: #5574be; cursor: pointer; }
+    .stat { margin-left: auto; color: var(--ok); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    canvas {
+      width: 100%;
+      border: 1px solid #2a3d6a;
+      border-radius: 10px;
+      background: #0a1228;
+      display: block;
+    }
+    #embedCanvas { height: 320px; }
+    #lossCanvas { height: 210px; margin-top: 10px; }
+    .sample {
+      margin-top: 8px;
+      min-height: 125px;
+      border: 1px solid #2a3d6a;
+      border-radius: 10px;
+      background: #0a1228;
+      padding: 10px;
+      white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      line-height: 1.2;
+    }
+    .tiny { font-size: 0.86rem; color: #b8c6eb; }
+    @media (max-width: 960px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Simple Shakespeare Char Transformer (Single Layer, 2D Embeddings)</h1>
+    <p id="status">Loading Karpathy tiny Shakespeare dataset…</p>
+
+    <div class="grid">
+      <section class="card">
+        <div class="controls">
+          <button id="startBtn" disabled>Start / Resume</button>
+          <button id="pauseBtn">Pause</button>
+          <button id="resetBtn">Reset model</button>
+          <label>Steps/tick <input id="stepsInput" type="number" value="8" min="1" max="100" style="width: 70px"></label>
+          <label>LR <input id="lrInput" type="number" value="0.03" step="0.005" min="0.001" max="1" style="width: 76px"></label>
+          <span class="stat" id="stats">step=0 loss=-</span>
+        </div>
+        <p>Character embedding points (learned in exactly 2 dimensions).</p>
+        <canvas id="embedCanvas" width="760" height="320"></canvas>
+        <p style="margin-top:8px">Training loss over updates.</p>
+        <canvas id="lossCanvas" width="760" height="220"></canvas>
+      </section>
+
+      <section class="card">
+        <p class="tiny">Periodic snapshot from training stream:</p>
+        <div class="sample" id="trainSample"></div>
+        <p class="tiny" style="margin-top:10px">Periodic generated sample:</p>
+        <div class="sample" id="genSample"></div>
+      </section>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+  <script>
+    "use strict";
+
+    const DATA_URLS = [
+      "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt",
+      "https://cdn.jsdelivr.net/gh/karpathy/char-rnn@master/data/tinyshakespeare/input.txt"
+    ];
+
+    const cfg = {
+      embDim: 2,
+      blockSize: 20,
+      batchSize: 32,
+      previewEvery: 35,
+      genLen: 220,
+    };
+
+    const state = {
+      rawText: "",
+      text: "",
+      chars: [],
+      stoi: new Map(),
+      itos: [],
+      V: 0,
+      model: null,
+      step: 0,
+      lossHistory: [],
+      running: false,
+    };
+
+    function sanitizeText(text) {
+      return text.replace(/\r/g, "");
+    }
+
+    async function loadDataset() {
+      const status = document.getElementById("status");
+      for (const url of DATA_URLS) {
+        try {
+          const r = await fetch(url, { cache: "no-store" });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          state.rawText = await r.text();
+          state.text = sanitizeText(state.rawText);
+          const chars = Array.from(new Set([...state.text])).sort();
+          state.chars = chars;
+          state.itos = chars;
+          state.stoi = new Map(chars.map((ch, i) => [ch, i]));
+          state.V = chars.length;
+          status.textContent = `Loaded ${state.text.length.toLocaleString()} characters from tiny Shakespeare. Vocab size=${state.V}.`;
+          document.getElementById("startBtn").disabled = false;
+          refreshTrainingSnippet();
+          return;
+        } catch (e) {
+          status.textContent = `Trying fallback source: ${e.message}`;
+        }
+      }
+      status.textContent = "Failed to load tiny Shakespeare dataset from available URLs.";
+    }
+
+    function initModel() {
+      if (state.model) state.model.dispose();
+      const V = state.V;
+      const D = cfg.embDim;
+      const B = cfg.blockSize;
+      const model = {};
+      model.tokenEmb = tf.variable(tf.randomNormal([V, D], 0, 0.2));
+      model.posEmb = tf.variable(tf.randomNormal([B, D], 0, 0.2));
+      model.Wq = tf.variable(tf.randomNormal([D, D], 0, 0.35));
+      model.Wk = tf.variable(tf.randomNormal([D, D], 0, 0.35));
+      model.Wv = tf.variable(tf.randomNormal([D, D], 0, 0.35));
+      model.Wo = tf.variable(tf.randomNormal([D, D], 0, 0.35));
+      model.Wout = tf.variable(tf.randomNormal([D, V], 0, 0.2));
+      model.bout = tf.variable(tf.zeros([V]));
+      model.vars = [model.tokenEmb, model.posEmb, model.Wq, model.Wk, model.Wv, model.Wo, model.Wout, model.bout];
+      model.opt = tf.train.adam(Number(document.getElementById("lrInput").value));
+      state.model = model;
+      state.step = 0;
+      state.lossHistory = [];
+      drawEmbeddings();
+      drawLoss();
+      document.getElementById("stats").textContent = "step=0 loss=-";
+      document.getElementById("genSample").textContent = "";
+    }
+
+    function randomBatch() {
+      const starts = [];
+      const upper = state.text.length - cfg.blockSize - 1;
+      for (let i = 0; i < cfg.batchSize; i++) starts.push((Math.random() * upper) | 0);
+      const x = starts.map(s => {
+        const arr = [];
+        for (let t = 0; t < cfg.blockSize; t++) arr.push(state.stoi.get(state.text[s + t]));
+        return arr;
+      });
+      const y = starts.map(s => {
+        const arr = [];
+        for (let t = 0; t < cfg.blockSize; t++) arr.push(state.stoi.get(state.text[s + t + 1]));
+        return arr;
+      });
+      return { x: tf.tensor2d(x, [cfg.batchSize, cfg.blockSize], "int32"), y: tf.tensor2d(y, [cfg.batchSize, cfg.blockSize], "int32") };
+    }
+
+    function forward(x) {
+      return tf.tidy(() => {
+        const m = state.model;
+        const B = x.shape[0], T = x.shape[1], D = cfg.embDim;
+        const tok = tf.gather(m.tokenEmb, x.flatten()).reshape([B, T, D]);
+        const pos = tf.gather(m.posEmb, tf.range(0, T, 1, "int32")).expandDims(0).tile([B, 1, 1]);
+        const h = tok.add(pos);
+
+        const q = h.matMul(m.Wq);
+        const k = h.matMul(m.Wk);
+        const v = h.matMul(m.Wv);
+
+        const kt = k.transpose([0, 2, 1]);
+        const scores = q.matMul(kt).div(Math.sqrt(D));
+        const mask = tf.linalg.bandPart(tf.ones([T, T]), -1, 0);
+        const bigNeg = tf.fill([B, T, T], -1e9);
+        const mask3 = mask.expandDims(0).tile([B, 1, 1]);
+        const masked = tf.where(mask3.cast("bool"), scores, bigNeg);
+        const att = tf.softmax(masked, -1);
+        const ctx = att.matMul(v).matMul(m.Wo);
+        const logits = ctx.matMul(m.Wout).add(m.bout);
+        return logits;
+      });
+    }
+
+    function trainStep() {
+      const batch = randomBatch();
+      const lossTensor = state.model.opt.minimize(() => {
+        const logits = forward(batch.x);
+        const labels = batch.y.flatten();
+        const loss = tf.losses.sparseCategoricalCrossentropy(labels, logits.reshape([cfg.batchSize * cfg.blockSize, state.V]), { fromLogits: true }).mean();
+        return loss;
+      }, true, state.model.vars);
+      const lossVal = lossTensor.dataSync()[0];
+      batch.x.dispose();
+      batch.y.dispose();
+      lossTensor.dispose();
+
+      state.step += 1;
+      state.lossHistory.push(lossVal);
+      if (state.lossHistory.length > 400) state.lossHistory.shift();
+
+      document.getElementById("stats").textContent = `step=${state.step} loss=${lossVal.toFixed(4)}`;
+
+      if (state.step % cfg.previewEvery === 0) {
+        refreshTrainingSnippet();
+        generateSample();
+        drawEmbeddings();
+      }
+      if (state.step % 5 === 0) drawLoss();
+    }
+
+    function refreshTrainingSnippet() {
+      const start = Math.max(0, ((Math.random() * (state.text.length - 260)) | 0));
+      document.getElementById("trainSample").textContent = state.text.slice(start, start + 260);
+    }
+
+    function sampleNextFromLogits(logitsRow) {
+      const probs = tf.softmax(logitsRow).dataSync();
+      const r = Math.random();
+      let cum = 0;
+      for (let i = 0; i < probs.length; i++) {
+        cum += probs[i];
+        if (r <= cum) return i;
+      }
+      return probs.length - 1;
+    }
+
+    function generateSample() {
+      const ids = [];
+      const seedStart = (Math.random() * (state.text.length - cfg.blockSize - 1)) | 0;
+      for (let i = 0; i < cfg.blockSize; i++) ids.push(state.stoi.get(state.text[seedStart + i]));
+
+      for (let t = 0; t < cfg.genLen; t++) {
+        const x = tf.tensor2d([ids.slice(-cfg.blockSize)], [1, cfg.blockSize], "int32");
+        const logits = forward(x);
+        const last = logits.squeeze([0]).slice([cfg.blockSize - 1, 0], [1, state.V]).squeeze([0]);
+        const nextId = sampleNextFromLogits(last);
+        ids.push(nextId);
+        x.dispose(); logits.dispose(); last.dispose();
+      }
+
+      const out = ids.map(i => state.itos[i]).join("");
+      document.getElementById("genSample").textContent = out;
+    }
+
+    function drawEmbeddings() {
+      if (!state.model) return;
+      const canvas = document.getElementById("embedCanvas");
+      const ctx = canvas.getContext("2d");
+      const W = canvas.width, H = canvas.height;
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = "#0a1228";
+      ctx.fillRect(0, 0, W, H);
+
+      const emb = state.model.tokenEmb.arraySync();
+      const xs = emb.map(v => v[0]);
+      const ys = emb.map(v => v[1]);
+      const xmin = Math.min(...xs), xmax = Math.max(...xs);
+      const ymin = Math.min(...ys), ymax = Math.max(...ys);
+      const pad = 30;
+      const sx = x => pad + ((x - xmin) / (xmax - xmin + 1e-9)) * (W - 2 * pad);
+      const sy = y => H - (pad + ((y - ymin) / (ymax - ymin + 1e-9)) * (H - 2 * pad));
+
+      ctx.strokeStyle = "#27406f";
+      ctx.beginPath();
+      ctx.moveTo(0, H / 2); ctx.lineTo(W, H / 2);
+      ctx.moveTo(W / 2, 0); ctx.lineTo(W / 2, H);
+      ctx.stroke();
+
+      ctx.font = "12px ui-monospace, monospace";
+      for (let i = 0; i < state.V; i++) {
+        const x = sx(xs[i]);
+        const y = sy(ys[i]);
+        ctx.fillStyle = "#60a5fa";
+        ctx.beginPath(); ctx.arc(x, y, 2.8, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#dce7ff";
+        const ch = state.itos[i] === "\n" ? "↵" : state.itos[i] === " " ? "␠" : state.itos[i];
+        ctx.fillText(ch, x + 4, y - 4);
+      }
+    }
+
+    function drawLoss() {
+      const canvas = document.getElementById("lossCanvas");
+      const ctx = canvas.getContext("2d");
+      const W = canvas.width, H = canvas.height;
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = "#0a1228";
+      ctx.fillRect(0, 0, W, H);
+      const arr = state.lossHistory;
+      if (arr.length < 2) return;
+      const min = Math.min(...arr), max = Math.max(...arr);
+      ctx.strokeStyle = "#34d399";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      arr.forEach((v, i) => {
+        const x = (i / (arr.length - 1)) * (W - 12) + 6;
+        const y = H - (((v - min) / (max - min + 1e-9)) * (H - 14) + 7);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    }
+
+    function loop() {
+      if (!state.running) return;
+      const steps = Math.max(1, Number(document.getElementById("stepsInput").value) || 1);
+      for (let i = 0; i < steps; i++) trainStep();
+      requestAnimationFrame(loop);
+    }
+
+    document.getElementById("startBtn").onclick = () => {
+      if (!state.model) initModel();
+      state.model.opt = tf.train.adam(Number(document.getElementById("lrInput").value));
+      state.running = true;
+      loop();
+    };
+    document.getElementById("pauseBtn").onclick = () => { state.running = false; };
+    document.getElementById("resetBtn").onclick = () => { state.running = false; initModel(); refreshTrainingSnippet(); };
+
+    loadDataset().then(() => { if (state.V > 0) initModel(); });
+  </script>
+</body>
+</html>
